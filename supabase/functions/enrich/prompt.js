@@ -97,9 +97,12 @@ Rules:
    - "Loan Return from Sister"      -> counterparty Sister,     ledger_effect "repaid_by"
    - "Loan return to Khuzaima"      -> counterparty Khuzaima,   ledger_effect "repaid_to"
    When the text names a loan but not its direction ("Mirza Loan"), use the direction field: money out is "lent", money in is "borrowed" — and lower the confidence, because a repayment looks identical.
-   Buying something *for* someone ("Pizza for sister", "Internet Bundle(Uzair)") is a gift, not a debt: set counterparty, leave ledger_effect null.
 
-5. Reimbursements received are incoming money with category "Reimbursement". Use ledger_effect "repaid_by" only when the text says the user had previously paid on someone's behalf; otherwise leave it null.
+4a. Buying something *for* a named person ("Pizza for sister", "Internet Bundle(Uzair)", "Cake for Tom") is money spent on their behalf: set counterparty to that person and ledger_effect "lent". It may turn out to have been a gift, and the user can write the balance off in one tap — but an untracked debt cannot be recovered, while a tracked gift costs one tap. Category is what was actually bought ("Eating Out" for pizza), not "Transfers & Loans": the ledger effect already records the debt.
+
+5. Reimbursements received are incoming money with category "Reimbursement". Use ledger_effect "repaid_by" whenever the money is coming back from a named person; leave it null when no person is named ("Security Reimbursement" is a deposit returned by a landlord, not a person).
+
+5a. Some entries arrive with a "settled" field. That is what the user stated outright at capture — usually a shared expense they split by name. Copy its counterparty and ledger_effect back verbatim and do not second-guess them; your job on those rows is the category and the canonical item.
 
 6. A recurring bill for a utility (electricity, gas, water, internet) is "Utilities", not "Subscriptions". "Subscriptions" is for software and media services.
 

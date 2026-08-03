@@ -10,6 +10,8 @@
  * the enrichment pass derives lives in separate, nullable columns.
  */
 
+import { personKey } from '../capture/split.js';
+
 const DB_NAME = 'hisaab';
 const DB_VERSION = 1;
 
@@ -122,6 +124,15 @@ function makeTransaction({
   currency = 'PKR',
   occurred_at,
   source = 'manual',
+  // Set at capture only when the user named it outright — a shared expense or a
+  // reimbursement. Enrichment fills these in for everything else, and never
+  // overwrites them when they are already here.
+  category = null,
+  counterparty_name = null,
+  ledger_effect = null,
+  split_group_id = null,
+  split_size = null,
+  source_text = null,
 }) {
   const now = new Date().toISOString();
   return {
@@ -133,12 +144,20 @@ function makeTransaction({
     occurred_at: occurred_at || now,
     source,
 
+    // The one line the user actually typed, when this row is one of several
+    // derived from it. Nothing about the original capture is lost.
+    source_text,
+    split_group_id,
+    split_size,
+    counterparty_name,
+    ledger_effect,
+    ledger_settled: 0,
+
     // Everything below is filled in later by the enrichment pass.
-    category: null,
+    category,
     item_id: null,
     route_id: null,
     counterparty_id: null,
-    ledger_effect: null,
     enriched_at: null,
     enrichment_version: 0,
 
@@ -167,6 +186,44 @@ export async function addTransaction(input) {
   return rec;
 }
 
+/**
+ * Add several transactions as one unit — a shared expense split across people.
+ * They share a `split_group_id` and go in a single IDB transaction, so the
+ * group can never end up half-written.
+ */
+export async function addTransactions(inputs, { source_text = null } = {}) {
+  if (!inputs.length) return [];
+  const db = await openDB();
+  const groupId = inputs.length > 1 ? newId() : null;
+  const occurredAt = new Date().toISOString();
+
+  const records = inputs.map((input) =>
+    makeTransaction({
+      ...input,
+      occurred_at: input.occurred_at || occurredAt,
+      split_group_id: groupId,
+      split_size: inputs.length > 1 ? inputs.length : null,
+      source_text,
+    })
+  );
+
+  const { t, done } = tx(db, ['events', 'transactions'], 'readwrite');
+  const txns = t.objectStore('transactions');
+  const evts = t.objectStore('events');
+  for (const rec of records) {
+    txns.put(rec);
+    evts.put({
+      event_id: newId(),
+      type: 'txn.created',
+      txn_id: rec.id,
+      payload: rec,
+      created_at: rec.created_at,
+    });
+  }
+  await done;
+  return records;
+}
+
 /** Patch a transaction. Unknown ids are a no-op. */
 export async function updateTransaction(id, patch) {
   const db = await openDB();
@@ -193,6 +250,41 @@ export async function updateTransaction(id, patch) {
 /** Soft delete — the row stays so the deletion can sync. */
 export async function deleteTransaction(id) {
   return updateTransaction(id, { deleted: 1 });
+}
+
+/**
+ * Call a person's balance square without inventing a payment.
+ *
+ * Marking the rows settled is honest in a way a synthetic "repaid" row is not:
+ * the spend still shows in history at the amount it really was, and the ledger
+ * simply stops counting it. That is what actually happened when a shared treat
+ * turns out to have been a gift.
+ */
+export async function settleCounterparty(key, { settled = 1 } = {}) {
+  const db = await openDB();
+  const { t, done } = tx(db, ['events', 'transactions'], 'readwrite');
+  const store = t.objectStore('transactions');
+  const all = await req(store.getAll());
+  const now = new Date().toISOString();
+  let touched = 0;
+
+  for (const row of all) {
+    if (row.deleted || !row.ledger_effect || !row.counterparty_name) continue;
+    if (personKey(row.counterparty_name) !== key) continue;
+    if (Boolean(row.ledger_settled) === Boolean(settled)) continue;
+    store.put({ ...row, ledger_settled: settled ? 1 : 0, updated_at: now, synced: 0 });
+    t.objectStore('events').put({
+      event_id: newId(),
+      type: settled ? 'ledger.settled' : 'ledger.reopened',
+      txn_id: row.id,
+      payload: { ledger_settled: settled ? 1 : 0 },
+      created_at: now,
+    });
+    touched++;
+  }
+
+  await done;
+  return touched;
 }
 
 /**

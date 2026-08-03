@@ -372,8 +372,8 @@ input[type='email']:focus { outline: none; border-color: var(--accent); }
 
 .p-actions button:disabled { opacity: .4; }
 
-/* Five tabs now, so they need to be a little tighter. */
-#tabs button { font-size: .78rem; padding: 0 2px; }
+/* Six tabs now, so they need to be tighter still. */
+#tabs button { font-size: .72rem; padding: 0 1px; }
 
 .surge {
   margin: -6px 0 12px;
@@ -415,4 +415,179 @@ pre {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+/* ---------- shared-expense preview ---------- */
+
+.split {
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  font-size: .84rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.split-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.split-head > span { color: var(--muted); }
+
+.link {
+  flex: none;
+  padding: 0;
+  font: inherit;
+  font-size: .84rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.split-rows { list-style: none; margin: 8px 0 0; padding: 0; }
+
+.split-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: .84rem;
+}
+
+.s-share { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- history rows and the inline editor ---------- */
+
+.day li.h-row { display: block; padding: 0; }
+
+.r-open {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 11px 2px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.r-tags { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
+.r-tags .tag { font-size: .72rem; padding: 2px 8px; }
+
+.h-edit {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin: 0 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.h-edit label { display: grid; gap: 4px; color: var(--muted); font-size: .78rem; }
+.h-edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.h-edit input,
+.h-edit select {
+  width: 100%;
+  padding: 10px 11px;
+  font: inherit;
+  font-size: .95rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.h-edit input:focus, .h-edit select:focus { outline: none; border-color: var(--accent); }
+.h-edit-msg { margin: 0; color: var(--danger); font-size: .82rem; }
+.h-edit-actions { display: flex; gap: 8px; }
+
+.h-edit-actions button {
+  padding: 9px 14px;
+  font: inherit;
+  font-size: .85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.h-edit-actions button[type='submit'] {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.h-edit-actions button.danger { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- ledger ---------- */
+
+.ledger-totals dd.in { color: var(--in); }
+.ledger-totals dd.out { color: var(--danger); }
+
+.person {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.person summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.person summary::-webkit-details-marker { display: none; }
+.p-name { font-weight: 600; }
+.p-net { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.p-net.in { color: var(--in); }
+.p-net.out { color: var(--danger); }
+
+.ledger-rows { list-style: none; margin: 12px 0 0; padding: 0; }
+
+.ledger-rows li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: .88rem;
+}
+
+.ledger-rows li.settled { opacity: .5; }
+.l-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-meta { grid-column: 1; color: var(--muted); font-size: .74rem; }
+.l-amt { grid-row: 1; grid-column: 2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.person .p-actions { margin-top: 12px; }
+
+.person .p-actions button {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.ledger code {
+  padding: 1px 5px;
+  font-size: .82em;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
 }

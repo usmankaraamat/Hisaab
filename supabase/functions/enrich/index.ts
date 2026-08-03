@@ -30,14 +30,31 @@ const CHUNK = 120;
 
 interface Known { items: string[]; routes: string[]; people: string[] }
 
-function json(body: unknown, status = 200) {
+/* CORS.
+ *
+ * supabase-js sends `apikey` and `x-client-info` on every functions.invoke, on
+ * top of the Authorization and Content-Type you would expect. A preflight that
+ * does not allow all four is rejected by the browser before the POST is ever
+ * sent, and the SDK surfaces that as "Failed to send a request to the Edge
+ * Function" — which reads like the function is down when it was never called.
+ * Echoing the requested headers keeps this correct as the SDK adds more.
+ */
+const ALLOWED_HEADERS = 'authorization, apikey, x-client-info, content-type';
+
+function cors(request: Request) {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-headers':
+      request.headers.get('access-control-request-headers') ?? ALLOWED_HEADERS,
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-max-age': '86400',
+  };
+}
+
+function json(request: Request, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      'content-type': 'application/json',
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'authorization, content-type',
-    },
+    headers: { 'content-type': 'application/json', ...cors(request) },
   });
 }
 
@@ -64,20 +81,14 @@ async function enrichChunk(apiKey: string, known: Known, slice: unknown[]) {
 
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: {
-        'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'authorization, content-type',
-        'access-control-allow-methods': 'POST, OPTIONS',
-      },
-    });
+    return new Response(null, { status: 204, headers: cors(request) });
   }
 
   const authorization = request.headers.get('Authorization');
-  if (!authorization) return json({ error: 'Missing Authorization header.' }, 401);
+  if (!authorization) return json(request, { error: 'Missing Authorization header.' }, 401);
 
   const geminiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!geminiKey) return json({ error: 'GEMINI_API_KEY is not set on the function.' }, 500);
+  if (!geminiKey) return json(request, { error: 'GEMINI_API_KEY is not set on the function.' }, 500);
 
   // Built from the caller's JWT, so RLS scopes every query below to them.
   const db = createClient(
@@ -88,7 +99,7 @@ Deno.serve(async (request: Request) => {
 
   const { data: auth } = await db.auth.getUser();
   const user = auth?.user;
-  if (!user) return json({ error: 'Not signed in.' }, 401);
+  if (!user) return json(request, { error: 'Not signed in.' }, 401);
 
   const body = await request.json().catch(() => ({}));
   const limit = Math.min(Number(body.limit) || MAX_BATCH, MAX_BATCH);
@@ -97,7 +108,7 @@ Deno.serve(async (request: Request) => {
     await Promise.all([
       db
         .from('transactions')
-        .select('id, raw_name, amount_minor, direction, occurred_at')
+        .select('id, raw_name, amount_minor, direction, occurred_at, counterparty_name, ledger_effect')
         .is('enriched_at', null)
         .eq('deleted', false)
         .order('occurred_at', { ascending: true })
@@ -107,8 +118,8 @@ Deno.serve(async (request: Request) => {
       db.from('people').select('display_name'),
     ]);
 
-  if (pendingError) return json({ error: pendingError.message }, 500);
-  if (!pending?.length) return json({ enriched: 0, message: 'Nothing pending.' });
+  if (pendingError) return json(request, { error: pendingError.message }, 500);
+  if (!pending?.length) return json(request, { enriched: 0, message: 'Nothing pending.' });
 
   // Drop rows that already have an open proposal, so a re-run is cheap.
   const { data: open } = await db
@@ -117,7 +128,7 @@ Deno.serve(async (request: Request) => {
     .eq('status', 'pending');
   const alreadyProposed = new Set((open ?? []).map((p) => p.transaction_id));
   const batch = pending.filter((t) => !alreadyProposed.has(t.id));
-  if (!batch.length) return json({ enriched: 0, message: 'All pending rows already have proposals.' });
+  if (!batch.length) return json(request, { enriched: 0, message: 'All pending rows already have proposals.' });
 
   const known: Known = {
     items: (items ?? []).map((i) => i.canonical_name),
@@ -125,12 +136,18 @@ Deno.serve(async (request: Request) => {
     people: (people ?? []).map((p) => p.display_name),
   };
 
+  // `settled` carries what capture already established for a shared expense.
+  // The model is told to leave those two fields alone and spend its attention
+  // on the category, which is the part the device could not work out.
   const payload = batch.map((t) => ({
     id: t.id,
     text: t.raw_name,
     amount_pkr: t.amount_minor / 100,
     direction: t.direction,
     at: t.occurred_at,
+    ...(t.counterparty_name
+      ? { settled: { counterparty: t.counterparty_name, ledger_effect: t.ledger_effect } }
+      : {}),
   }));
 
   const validIds = new Set(batch.map((t) => t.id));
@@ -144,7 +161,7 @@ Deno.serve(async (request: Request) => {
       out = await enrichChunk(geminiKey, known, payload.slice(i, i + CHUNK));
     } catch (err) {
       // Keep whatever earlier chunks produced rather than losing the whole pass.
-      if (!results.length) return json({ error: `Gemini call failed: ${(err as Error).message}` }, 502);
+      if (!results.length) return json(request, { error: `Gemini call failed: ${(err as Error).message}` }, 502);
       break;
     }
 
@@ -187,12 +204,12 @@ Deno.serve(async (request: Request) => {
     status: 'pending',
   }));
 
-  if (!proposals.length) return json({ error: 'Model returned no usable results.' }, 502);
+  if (!proposals.length) return json(request, { error: 'Model returned no usable results.' }, 502);
 
   const { error: writeError } = await db.from('enrichment_proposals').insert(proposals);
-  if (writeError) return json({ error: writeError.message }, 500);
+  if (writeError) return json(request, { error: writeError.message }, 500);
 
-  return json({
+  return json(request, {
     enriched: proposals.length,
     requested: batch.length,
     missing: batch.length - proposals.length,

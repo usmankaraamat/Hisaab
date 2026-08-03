@@ -20,6 +20,8 @@ import { parseBluecoins } from '../src/import/bluecoins.js';
 import { stableId } from '../src/db/local.js';
 import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
+import { planEntry } from '../src/capture/split.js';
+import { balances, ledgerTotals } from '../src/lib/ledger.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import {
   rideSurge,
@@ -109,6 +111,102 @@ check('same import key gives the same id on both devices', idA, idB);
 check('a different key gives a different id', (await stableId(key + 'x')) !== idA, true);
 check('the id is a valid v5-shaped uuid',
   /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(idA), true);
+
+console.log('\n--- shared expenses ---');
+// "cake for tom, dick, harry 2500" has to become three rows that add back up to
+// 2500, none of it charged to the user, and each owed by one person.
+const cake = planEntry('cake for tom, dick, harry', 250000, 'out', { knownPeople: [] });
+check('three names split three ways', cake.rows.length, 3);
+check('splits automatically on a list of names', cake.auto, true);
+check('the shares add back up to the amount typed',
+  cake.rows.reduce((a, r) => a + r.amount_minor, 0), 250000);
+check('the remainder is not lost to integer division',
+  cake.rows.map((r) => r.amount_minor), [83334, 83333, 83333]);
+check('every share is owed back', cake.rows.every((r) => r.ledger_effect === 'lent'), true);
+check('each row names its person',
+  cake.rows.map((r) => r.counterparty_name), ['Tom', 'Dick', 'Harry']);
+check('each row reads as what it is', cake.rows[0].raw_name, 'cake for Tom');
+check('no share is charged to the user', cake.includesMe, false);
+
+const withMe = planEntry('cake for tom, dick, harry, me', 250000, 'out', { knownPeople: [] });
+check('naming yourself adds a fourth share', withMe.rows.length, 4);
+check('your share is an ordinary expense',
+  [withMe.rows[3].counterparty_name, withMe.rows[3].ledger_effect], [null, null]);
+check('the total is still exactly what was typed',
+  withMe.rows.reduce((a, r) => a + r.amount_minor, 0), 250000);
+
+// A single unfamiliar name is offered, not applied — otherwise "charger for
+// laptop" invents a person called Laptop.
+const unknownOne = planEntry('pizza for sister', 55000, 'out', { knownPeople: [] });
+check('one unknown name is proposed rather than split', unknownOne.auto, false);
+check('one KNOWN name splits on its own',
+  planEntry('pizza for sister', 55000, 'out', { knownPeople: ['Sister'] }).auto, true);
+check('name matching ignores case',
+  planEntry('pizza for SISTER', 55000, 'out', { knownPeople: ['sister'] }).auto, true);
+
+check('a bracketed aside is the same thing',
+  planEntry('Slanty(for sis)', 12000, 'out', { knownPeople: ['Sis'] })?.rows[0].counterparty_name, 'Sis');
+check('a bare bracketed name works too',
+  planEntry('Internet Bundle(Uzair)', 50000, 'out', { knownPeople: ['Uzair'] })?.rows[0].counterparty_name, 'Uzair');
+
+check('an ordinary entry is left alone', planEntry('chicken', 90000, 'out'), null);
+check('a route is never read as a person',
+  planEntry('Indrive Home - Office', 20000, 'out', { knownPeople: ['Office'] }), null);
+check('digits disqualify a name',
+  planEntry('ticket for 2 people', 50000, 'out'), null);
+check('"+" joins things, it does not separate people',
+  planEntry('Anser Farewell + Oil Spray Bottle', 50000, 'out', { knownPeople: ['Anser'] }), null);
+check('incoming money is never a purchase on someone else’s behalf',
+  planEntry('gift for sister', 50000, 'in', { knownPeople: ['Sister'] }), null);
+
+const back = planEntry('reimbursement from tom', 50000, 'out', { knownPeople: [] });
+check('a reimbursement is incoming money', back.rows[0].direction, 'in');
+check('a reimbursement cancels a due', back.rows[0].ledger_effect, 'repaid_by');
+check('a reimbursement names the payer', back.rows[0].counterparty_name, 'Tom');
+check('a reimbursement is categorised at capture', back.rows[0].category, 'Reimbursement');
+check('a single reimbursement keeps the text typed', back.rows[0].raw_name, 'reimbursement from tom');
+check('"paid back by" is the same thing',
+  planEntry('paid back by tom', 50000, 'out')?.rows[0].ledger_effect, 'repaid_by');
+check('a reimbursement with no person is not one',
+  planEntry('Security Reimbursement', 50000, 'in'), null);
+
+console.log('\n--- ledger balances ---');
+const owed = (name, effect, minor, extra = {}) => ({
+  raw_name: name,
+  counterparty_name: name,
+  ledger_effect: effect,
+  amount_minor: minor,
+  direction: effect === 'lent' || effect === 'repaid_to' ? 'out' : 'in',
+  occurred_at: '2026-08-01T10:00:00.000Z',
+  deleted: 0,
+  ...extra,
+});
+
+const book = balances([
+  owed('Tom', 'lent', 83334),
+  owed('Tom', 'repaid_by', 50000),
+  owed('Dick', 'lent', 83333),
+  owed('Harry', 'lent', 83333),
+  owed('Harry', 'repaid_by', 83333),
+  owed('Khuzaima', 'borrowed', 2500000),
+]);
+const who = (n) => book.find((p) => p.name === n);
+check('a part payment leaves the remainder', who('Tom').netMinor, 33334);
+check('paying in full squares up', who('Harry').netMinor, 0);
+check('borrowing shows as money you owe', who('Khuzaima').netMinor, -2500000);
+check('the largest balance sorts first', book[0].name, 'Khuzaima');
+check('rows with no ledger effect are ignored',
+  balances([{ raw_name: 'chicken', amount_minor: 90000, direction: 'out', deleted: 0 }]).length, 0);
+check('a deleted row stops counting',
+  balances([owed('Tom', 'lent', 50000, { deleted: 1 })]).length, 0);
+check('a written-off row keeps its history but not its balance',
+  balances([owed('Tom', 'lent', 50000, { ledger_settled: 1 })])[0].netMinor, 0);
+check('"tom" and "Tom" are one person',
+  balances([owed('tom', 'lent', 50000), owed('Tom', 'repaid_by', 20000)]).length, 1);
+
+const totals = ledgerTotals(book);
+check('totals separate the two directions',
+  [totals.owedToMeMinor, totals.iOweMinor], [116667, 2500000]);
 
 console.log('\n--- route normalisation ---');
 check('hyphen, no spaces', parseRoute('Indrive Flat-Office'), {

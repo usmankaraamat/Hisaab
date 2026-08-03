@@ -86,16 +86,21 @@ export const CASES = [
   { name: 'Abdurrehman Loan', cat: ['Transfers & Loans'], party: 'Abdurrehman', ledger: 'any', route: null, ambiguous: true },
   { name: "Anser's Loan", cat: ['Transfers & Loans'], party: 'Anser', ledger: 'any', route: null, ambiguous: true },
 
-  // ---- bought FOR someone: a gift, not a loan ----
-  { name: 'Pizza for sister', cat: 'any', ledger: null, party: 'Sister', route: null },
-  { name: 'Treat for sister', cat: 'any', ledger: null, party: 'Sister', route: null },
-  { name: 'DSM-5 Book for sis', cat: 'any', ledger: null, party: 'Sister', route: null },
-  { name: 'Slanty(for sis)', cat: 'any', ledger: null, party: 'Sister', route: null },
-  { name: 'Internet Bundle(Uzair)', cat: 'any', ledger: null, party: 'Uzair', route: null },
+  // ---- bought FOR someone: spent on their behalf, so it is owed back ----
+  // These used to be graded as gifts with no ledger effect. That was the wrong
+  // default: an untracked debt is unrecoverable, whereas a tracked gift is one
+  // tap to write off in the ledger. The category stays whatever was bought —
+  // the debt lives in ledger_effect, not in "Transfers & Loans".
+  { name: 'Pizza for sister', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
+  { name: 'Treat for sister', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
+  { name: 'DSM-5 Book for sis', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
+  { name: 'Slanty(for sis)', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
+  { name: 'Internet Bundle(Uzair)', cat: 'any', ledger: 'lent', party: 'Uzair', route: null },
 
   // ---- reimbursements ----
-  { name: 'Reimbursement from Mutahhar Bhai', cat: ['Reimbursement'], party: 'Mutahhar Bhai', route: null, dir: 'in' },
-  { name: 'Security Reimbursement', cat: ['Reimbursement'], party: null, route: null, dir: 'in' },
+  { name: 'Reimbursement from Mutahhar Bhai', cat: ['Reimbursement'], party: 'Mutahhar Bhai', ledger: 'repaid_by', route: null, dir: 'in' },
+  // No person named — a deposit coming back, which must not open a balance.
+  { name: 'Security Reimbursement', cat: ['Reimbursement'], party: null, ledger: null, route: null, dir: 'in' },
   { name: 'KFC + Indrive + Padel Reimbursement', cat: ['Reimbursement'], route: null, dir: 'in' },
 
   // ---- subscriptions ----

@@ -4,6 +4,7 @@ import { renderHistory } from './views/history.js';
 import { renderSettings } from './views/settings.js';
 import { renderReview } from './views/review.js';
 import { renderInsights } from './views/insights.js';
+import { renderLedger } from './views/ledger.js';
 import { startAutoSync } from './db/sync.js';
 import { setMeta } from './db/local.js';
 import { invalidate } from './capture/predict.js';
@@ -11,6 +12,7 @@ import { invalidate } from './capture/predict.js';
 const views = {
   add: renderAdd,
   history: renderHistory,
+  ledger: renderLedger,
   insights: renderInsights,
   review: renderReview,
   settings: renderSettings,
