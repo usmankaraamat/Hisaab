@@ -1,0 +1,19 @@
+node_modules/
+dist/
+dist-ssr/
+.DS_Store
+*.local
+
+# Secrets — never commit.
+# Bracketed so the rule holds regardless of core.ignorecase.
+[Ss]tuff.txt
+.env
+.env.*
+!.env.example
+supabase/.env
+supabase/.temp/
+
+# The real Bluecoins export. Personal financial data — kept local, imported on
+# the device via Settings → Import. scripts/verify.mjs and scripts/eval/ skip
+# their export-backed sections when it is absent.
+TransactionsLatest.csv

@@ -1,0 +1,6 @@
+project_id = "iqjerqtcquvchvbseveh"
+
+[functions.enrich]
+# The function reads the caller's JWT itself and builds an RLS-scoped client
+# from it, so the platform's own JWT gate stays on.
+verify_jwt = true

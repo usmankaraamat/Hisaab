@@ -1,0 +1,20 @@
+{
+  "name": "hisaab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/check-build.mjs",
+    "preview": "vite preview",
+    "verify": "node scripts/verify.mjs",
+    "eval": "node scripts/eval/run.mjs",
+    "eval:scale": "node scripts/eval/scale.mjs"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.0"
+  }
+}
