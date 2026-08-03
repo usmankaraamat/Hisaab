@@ -75,6 +75,44 @@ export function newId() {
   });
 }
 
+function uuidFromBytes(bytes) {
+  const b = bytes.slice(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x50; // version 5 — name-based
+  b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * A primary key derived from the import key, so the same CSV row imported on two
+ * devices lands on the same id.
+ *
+ * Without this each device coins a random id for the same underlying row. Both
+ * push; the second one keeps its own id, misses the `onConflict: 'id'` target,
+ * and trips the (user_id, client_event_id) unique index on the server. That
+ * raises 23505, which aborts the whole sync loop instead of de-duplicating —
+ * so a second device importing the same export would permanently break sync.
+ * Deriving the id makes the collision an ordinary last-write-wins upsert.
+ */
+export async function stableId(key) {
+  const text = new TextEncoder().encode(String(key));
+  if (globalThis.crypto?.subtle) {
+    return uuidFromBytes(new Uint8Array(await crypto.subtle.digest('SHA-256', text)));
+  }
+  // Non-secure context (plain http on a LAN address): FNV-1a over four offset
+  // seeds. Weaker than SHA-256, but it only has to be deterministic.
+  const bytes = new Uint8Array(16);
+  for (let s = 0; s < 4; s++) {
+    let h = 0x811c9dc5 ^ s;
+    for (const byte of text) {
+      h ^= byte;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    bytes.set([h >>> 24, (h >>> 16) & 255, (h >>> 8) & 255, h & 255], s * 4);
+  }
+  return uuidFromBytes(bytes);
+}
+
 /** Shape a transaction record. Callers pass only what capture knows. */
 function makeTransaction({
   id,
@@ -169,7 +207,10 @@ export async function bulkAdd(inputs) {
 
   for (const input of inputs) {
     if (input.client_event_id && existingKeys.has(input.client_event_id)) continue;
-    const rec = makeTransaction(input);
+    // Derived, not random, so a second device importing the same file converges
+    // on one row instead of colliding on the server's uniqueness constraint.
+    const id = input.id || (input.client_event_id ? await stableId(input.client_event_id) : undefined);
+    const rec = makeTransaction({ ...input, id });
     rec.client_event_id = input.client_event_id || null;
     fresh.push(rec);
   }

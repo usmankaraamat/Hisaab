@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 
 import { parseEntry } from '../src/capture/parse.js';
 import { parseBluecoins } from '../src/import/bluecoins.js';
+import { stableId } from '../src/db/local.js';
 import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { rankSuggestions } from '../src/capture/predict.js';
@@ -96,6 +97,18 @@ console.log(`\n  spent    ${formatMinor(summary.spentMinor)}`);
 console.log(`  received ${formatMinor(summary.receivedMinor)}`);
 console.log(`  range    ${summary.min.slice(0, 10)} -> ${summary.max.slice(0, 10)} (${summary.days} days)`);
 }
+
+console.log('\n--- cross-device import ids ---');
+// Two devices importing the same export must converge on one row, or the second
+// device's push collides with the (user_id, client_event_id) unique index and
+// aborts the sync loop.
+const key = 'bluecoins:2026-08-03 20:51:39.478|Eat Out|-550.00';
+const idA = await stableId(key);
+const idB = await stableId(key);
+check('same import key gives the same id on both devices', idA, idB);
+check('a different key gives a different id', (await stableId(key + 'x')) !== idA, true);
+check('the id is a valid v5-shaped uuid',
+  /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(idA), true);
 
 console.log('\n--- route normalisation ---');
 check('hyphen, no spaces', parseRoute('Indrive Flat-Office'), {
