@@ -36,6 +36,11 @@ Money is stored in integer minor units. `raw_name` — exactly what was typed �
 immutable; every model-derived field is nullable and versioned, so a bad pass can
 be recomputed without touching the original text.
 
+That immutability is why the tidy name is a separate column. `home office
+indrive` resolves to **Indrive Home → Office**, and the app shows that, with the
+raw text underneath whenever the two differ — so a rewrite is visible rather than
+silent, and the evidence a re-run needs is still there.
+
 **Nothing auto-commits.** The enrichment pass writes to `enrichment_proposals`
 with status `pending`. The Review tab promotes them. A bad pass costs one tap.
 
@@ -60,6 +65,11 @@ ordinary expense and the rest stays owed.
 `reimbursement from tom 500` is the other half: incoming money against Tom, which
 the **Ledger** tab nets against his share.
 
+It runs both ways. `chicken piece from harry 500` means Harry paid, so the debt
+points the other direction — and because nothing left your wallet, that row
+raises what you owe without reducing your cash. `loan from khuzaima 25000` is
+the case where money really did arrive, so it does both.
+
 This runs at capture, not in the enrichment pass, because it is not an inference
 — you named the people. The ledger is therefore correct on a phone with no
 signal, hours before any model runs. Enrichment still assigns the category, and
@@ -75,26 +85,66 @@ Tom splits on its own. And `+` is not a name separator, because real entries lik
 Not every "for someone" entry is really a debt. Rather than guess, the balance is
 tracked and the ledger offers one tap to call it square — which leaves the spend
 intact in history. An untracked debt is unrecoverable; a tracked gift costs a tap.
+Entries are written off individually as well as per person, because buying
+someone four things and meaning one of them as a gift is ordinary.
+
+## What is left
+
+The question that made tracking worth starting — *how much do I have?* — is not
+one number. In three months of live data, 83,300 of 121,676 rupees "spent" was an
+investment, a remittance and a loan. A balance that treats those as consumption
+is wrong on day one, and a number caught lying once stops being read. So four are
+computed:
+
+| | |
+| --- | --- |
+| **cash** | everything that actually moved. The honest total. |
+| **spend** | consumption only. Savings, transfers and money lent out are excluded. |
+| **committed** | recurring charges already due before the next income. |
+| **safe** | cash − committed − the savings target not yet met − what you owe. |
+
+`safe ÷ days left` sits under the capture input, because that is the only place a
+number can change a decision. The period runs from your last income entry, not
+the calendar: a salary landing on the 3rd makes "this month" the wrong window and
+every allowance computed from it wrong for three days.
+
+The savings target is deducted **before** the allowance, not left over after it.
+Saving what remains at the end of the month is exactly the thing that does not
+work.
+
+## Entering the same thing twice
+
+`Cake 2200` was entered, and thirty-five minutes later the same cake was entered
+again as a five-way split of 440. Nothing noticed; 2,200 was counted twice. It is
+the natural failure of an app that makes logging take three seconds — re-entering
+is cheaper than checking.
+
+So capture warns when the same thing at the same amount is already there. A split
+is compared at its **total**, because no single 440 share matches a 2,200 row.
+A warning, never a block: buying two Diet Cokes in an afternoon is ordinary, and
+the user is the one who knows.
 
 ## Model choice is measured, not assumed
 
-`scripts/eval/` grades the enrichment prompt against 66 real entries chosen for
+`scripts/eval/` grades the enrichment prompt against 79 real entries chosen for
 being hard: route direction (`Flat → Office` ≠ `Office → Flat`), a word that is a
 person in one entry and a place in another (`Anser Farewell` vs `Indrive
-Anser-NUST`), gifts that look like loans (`Pizza for sister`), typos
-(`Yango Flat-Offic`), and entries terse enough that low confidence is the correct
-answer (`Washroom`).
+Anser-NUST`), gifts that look like loans (`Pizza for sister`), a person and a
+vendor one preposition apart (`Lunch from Khuzaima` vs `Burger from Hardees`),
+typos (`Yango Flat-Offic`), and entries terse enough that low confidence is the
+correct answer (`Washroom`).
 
-| model | overall | routes | ledger | calibration | cost / 66 rows |
-| --- | --- | --- | --- | --- | --- |
-| **gemini-3.5-flash-lite** | **100%** | 100% | 100% | 56% | $0.0027 |
-| gemini-3.5-flash | 100% | 100% | 100% | 56% | $0.0147 |
-| gemini-3.6-flash | 99% | 100% | 100% | 100% | $0.0091 |
-| gemini-3.1-flash-lite | 99% | 98% | 100% | 89% | $0.0038 |
+| model | overall | routes | ledger | display | calibration | cost / 79 rows |
+| --- | --- | --- | --- | --- | --- | --- |
+| **gemini-3.5-flash-lite** | **100%** | 100% | 100% | 100% | 56% | $0.0037 |
+| gemini-3.5-flash | 100% | 100% | 100% | 100% | 33% | $0.0203 |
 
-flash-lite matches the larger model's miss profile at a fifth of the cost, so
-that is what ships. `thinkingLevel: high` lifts calibration to 89% for 2× cost —
-worth it only if the review queue feels too thin.
+flash-lite beats the larger model outright here — same 100% on every graded
+dimension, better calibration, a fifth of the cost — so that is what ships. Every
+remaining miss on both models is calibration on the same handful of rows
+(`Mirza Loan`, `Trashman`): answered correctly, just more confidently than the
+evidence warrants. `thinkingLevel: high` lifts calibration for 2× cost, worth it
+only if the review queue feels too thin.
 
 The benchmark imports the prompt the Edge Function actually deploys, so it cannot
 drift from what runs in production.

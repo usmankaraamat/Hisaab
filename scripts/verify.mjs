@@ -22,6 +22,9 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
+import { budgetSummary, categoryTotals } from '../src/lib/budget.js';
+import { findDuplicate } from '../src/lib/dupes.js';
+import { txnLabel, hasRewrite } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import {
   rideSurge,
@@ -207,6 +210,170 @@ check('"tom" and "Tom" are one person',
 const totals = ledgerTotals(book);
 check('totals separate the two directions',
   [totals.owedToMeMinor, totals.iOweMinor], [116667, 2500000]);
+
+console.log('\n--- bought FROM someone: they paid, so it is owed back ---');
+const fromHarry = planEntry('chicken piece from Harry', 50000, 'out', { knownPeople: ['Harry'] });
+check('"from" opens a debt the other way', fromHarry.rows[0].ledger_effect, 'borrowed');
+check('"from" names the payer', fromHarry.rows[0].counterparty_name, 'Harry');
+check('a purchase someone else funded is still an expense', fromHarry.rows[0].direction, 'out');
+check('the category is left to enrichment', fromHarry.rows[0].category, null);
+check('one row, not a split', fromHarry.rows.length, 1);
+check('an unfamiliar payer is offered, not applied',
+  planEntry('chicken from Metro', 50000, 'out', { knownPeople: [] }).auto, false);
+check('a known payer applies on its own',
+  planEntry('chicken from Harry', 50000, 'out', { knownPeople: ['harry'] }).auto, true);
+
+const cashLoan = planEntry('Loan from Khuzaima', 2500000, 'out', { knownPeople: [] });
+check('a cash loan is money arriving', cashLoan.rows[0].direction, 'in');
+check('a cash loan is still borrowed', cashLoan.rows[0].ledger_effect, 'borrowed');
+check('a cash loan needs no confirmation', cashLoan.auto, true);
+check('a cash loan is categorised at capture', cashLoan.rows[0].category, 'Transfers & Loans');
+check('a reimbursement is not read as a purchase from someone',
+  planEntry('reimbursement from tom', 50000, 'out').kind, 'reimbursement');
+check('a route is never read as buying from a person',
+  planEntry('Indrive Home - Office from Gym', 20000, 'out', { knownPeople: [] }), null);
+check('two payers is too ambiguous to guess',
+  planEntry('cake from tom and dick', 50000, 'out', { knownPeople: ['Tom', 'Dick'] }), null);
+
+console.log('\n--- what is left ---');
+
+/* The scenario is the live data in miniature, because the live data is what
+ * exposed the problem: of 121,676 "spent", 83,300 was an investment, a
+ * remittance and a loan. Every assertion below is about keeping those apart. */
+const spend = (over) => ({
+  raw_name: 'x',
+  amount_minor: 0,
+  direction: 'out',
+  occurred_at: '2026-08-05T10:00:00.000Z',
+  category: null,
+  deleted: 0,
+  ...over,
+});
+
+const ledgerJuly = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 13000000, category: 'Income',
+          occurred_at: '2026-08-03T13:00:00.000Z' }),
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries' }),
+  spend({ raw_name: 'Investment', amount_minor: 5000000, category: 'Savings' }),
+  spend({ raw_name: 'cake for Tom', amount_minor: 44000, category: 'Eating Out',
+          counterparty_name: 'Tom', ledger_effect: 'lent' }),
+  spend({ raw_name: 'chicken piece from Harry', amount_minor: 50000, category: 'Eating Out',
+          counterparty_name: 'Harry', ledger_effect: 'borrowed' }),
+  // Before the salary, so the period must not see it at all.
+  spend({ raw_name: 'old thing', amount_minor: 900000, category: 'Shopping',
+          occurred_at: '2026-07-30T10:00:00.000Z' }),
+];
+
+const asOfAug8 = new Date('2026-08-08T12:00:00.000Z');
+const b = budgetSummary(ledgerJuly, { now: asOfAug8 });
+
+check('the period starts at the last income', b.since, '2026-08-03T13:00:00.000Z');
+check('a salary implies the next one a month later', b.nextIncomeAt.slice(0, 10), '2026-09-03');
+check('spending before the period is excluded', b.spendMinor, 100000);
+check('an investment is not spending', b.savedMinor, 5000000);
+check('money lent out is not spending', b.lentOutMinor, 44000);
+check('a purchase someone else paid for is not spending', b.fundedByOthersMinor, 50000);
+check('and it is a debt', b.owedByMeMinor, 50000);
+// 13,000,000 in, less 100,000 + 5,000,000 + 44,000 out. The 50,000 Harry paid
+// never touched the wallet, and the July row is outside the period.
+check('cash counts everything that actually moved', b.cashMinor, 7856000);
+check('what you owe is subtracted from what is safe to spend',
+  b.safeToSpendMinor, 7856000 - 50000);
+// Aug 8 12:00 to Sep 3 13:00 is 26 days and an hour, and a part day still has
+// to be spent through, so it rounds up.
+check('the allowance divides by the days remaining', b.daysLeft, 27);
+check('the allowance is quoted in whole rupees', b.dailyMinor, 289100);
+
+const saving = budgetSummary(ledgerJuly, { savingsTargetMinor: 6000000, now: asOfAug8 });
+check('a savings target is deducted before the allowance, not after',
+  saving.safeToSpendMinor, 7856000 - 1000000 - 50000);
+check('and only the part not yet saved', saving.savingsRemainingMinor, 1000000);
+check('a met target takes nothing further',
+  budgetSummary(ledgerJuly, { savingsTargetMinor: 4000000, now: asOfAug8 }).savingsRemainingMinor, 0);
+
+const withOpening = budgetSummary(ledgerJuly, {
+  opening: { amountMinor: 2000000, at: '2026-08-06T00:00:00.000Z' },
+  now: asOfAug8,
+});
+check('a later opening balance overrides the income anchor', withOpening.anchoredTo, 'opening');
+check('and rows before it stop counting', withOpening.cashMinor, 2000000);
+check('an earlier opening balance defers to the income anchor',
+  budgetSummary(ledgerJuly, {
+    opening: { amountMinor: 2000000, at: '2026-08-01T00:00:00.000Z' },
+    now: asOfAug8,
+  }).anchoredTo, 'income');
+check('with no income and no opening there is nothing to report',
+  budgetSummary([spend({ amount_minor: 5000 })], { now: asOfAug8 }).anchoredTo, 'none');
+
+const cats = categoryTotals(ledgerJuly, { from: b.since });
+check('the breakdown reconciles with total spend',
+  cats.reduce((a, c) => a + c.totalMinor, 0), b.spendMinor);
+check('savings never appears as a spending category',
+  cats.some((c) => c.category === 'Savings'), false);
+check('an uncategorised row is reported, not dropped',
+  categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
+
+console.log('\n--- duplicate guard ---');
+
+/* The real case: "Cake 2200" at 18:17, then the same cake re-entered at 18:52
+ * as five shares of 440. No single share matches the lump, so the group has to
+ * be compared at its total or the duplicate is invisible. */
+const cakeGroup = ['Jahangir', 'Taqi', 'Khuzi', 'Hashaam'].map((who, i) =>
+  spend({
+    id: `s${i}`,
+    raw_name: `cake for ${who}`,
+    amount_minor: 44000,
+    split_group_id: 'g1',
+    source_text: 'cake for jahangir, taqi, khuzi, hashaam, me',
+    occurred_at: '2026-08-03T18:52:00.000Z',
+  })
+);
+cakeGroup.push(spend({
+  id: 's4', raw_name: 'cake', amount_minor: 44000, split_group_id: 'g1',
+  source_text: 'cake for jahangir, taqi, khuzi, hashaam, me',
+  occurred_at: '2026-08-03T18:52:00.000Z',
+}));
+
+const dup = findDuplicate(cakeGroup, {
+  name: 'Cake',
+  amountMinor: 220000,
+  at: '2026-08-03T19:20:00.000Z',
+});
+check('a split group is matched at its total', dup?.amountMinor, 220000);
+check('and reported by how long ago it was', dup.minutesAgo, 28);
+check('a different amount is not a duplicate',
+  findDuplicate(cakeGroup, { name: 'Cake', amountMinor: 210000, at: '2026-08-03T19:20:00.000Z' }), null);
+check('the same amount on a different thing is not a duplicate',
+  findDuplicate(cakeGroup, { name: 'Biryani', amountMinor: 220000, at: '2026-08-03T19:20:00.000Z' }), null);
+check('yesterday is outside the window',
+  findDuplicate(cakeGroup, { name: 'Cake', amountMinor: 220000, at: '2026-08-05T19:20:00.000Z' }), null);
+check('two Diet Cokes of different prices are fine',
+  findDuplicate(
+    [spend({ id: 'a', raw_name: 'Diet Coke', amount_minor: 12000 })],
+    { name: 'Diet Coke', amountMinor: 10000, at: '2026-08-05T14:00:00.000Z' }
+  ), null);
+check('but the identical entry twice in an hour is flagged',
+  findDuplicate(
+    [spend({ id: 'a', raw_name: 'Diet Coke', amount_minor: 12000 })],
+    { name: 'diet coke', amountMinor: 12000, at: '2026-08-05T10:40:00.000Z' }
+  )?.minutesAgo, 40);
+check('incoming money is never compared against an expense',
+  findDuplicate(
+    [spend({ id: 'a', raw_name: 'Salary', amount_minor: 12000, direction: 'in' })],
+    { name: 'Salary', amountMinor: 12000, direction: 'out', at: '2026-08-05T10:40:00.000Z' }
+  ), null);
+
+console.log('\n--- display names ---');
+check('a tidy name replaces the raw text',
+  txnLabel({ raw_name: 'home office indrive', display_name: 'Indrive Home → Office' }),
+  'Indrive Home → Office');
+check('a ride is tidied offline, before any model has run',
+  txnLabel({ raw_name: 'Indrive gym-home' }), 'Indrive Gym → Home');
+check('anything else falls back to what was typed',
+  txnLabel({ raw_name: 'Eggs + Bread' }), 'Eggs + Bread');
+check('the original is offered only when it differs',
+  [hasRewrite({ raw_name: 'Eggs + Bread' }), hasRewrite({ raw_name: 'Indrive gym-home' })],
+  [false, true]);
 
 console.log('\n--- route normalisation ---');
 check('hyphen, no spaces', parseRoute('Indrive Flat-Office'), {

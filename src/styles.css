@@ -384,8 +384,9 @@ input[type='email']:focus { outline: none; border-color: var(--accent); }
   border-radius: 8px;
 }
 
-/* ---------- insights ---------- */
+/* ---------- spending ---------- */
 
+.spending .row,
 .insights .row {
   display: flex;
   align-items: flex-start;
@@ -396,13 +397,90 @@ input[type='email']:focus { outline: none; border-color: var(--accent); }
   font-size: .92rem;
 }
 
+.spending .row:last-child,
 .insights .row:last-child { border-bottom: 0; }
+.spending .row small,
 .insights .row small { display: block; margin-top: 2px; color: var(--muted); font-size: .76rem; }
+.spending .num,
 .insights .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.spending .num small,
 .insights .num small { font-weight: 400; }
+/* Red is money going the wrong way, green the right way — matching the amount
+ * colours on every other screen, so `up` is not "bigger" but "in your favour". */
+.spending .num.up,
 .insights .num.up { color: var(--danger); }
+.spending .num.down,
 .insights .num.down { color: var(--accent); }
 .warn-text { color: var(--danger); }
+
+.spending .big {
+  margin-top: 4px;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.spending .big.down { color: var(--danger); }
+.spending .big-sub { margin: 2px 0 12px; color: var(--muted); font-size: .85rem; }
+.spending .big-sub b { color: var(--text); }
+.spending .aside { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
+.spending .aside .row { font-size: .86rem; color: var(--muted); }
+
+.cats { display: grid; gap: 2px; }
+
+.cat {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 9px 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.cat:last-child { border-bottom: 0; }
+.cat-head { display: flex; justify-content: space-between; gap: 12px; font-size: .92rem; }
+.cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-sub { color: var(--muted); font-size: .76rem; }
+
+.cat-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cat-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+/* ---------- what is left, on the capture screen ---------- */
+
+.allowance {
+  margin: 14px 0 0;
+  padding: 9px 12px;
+  font-size: .84rem;
+  color: var(--muted);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.allowance b { color: var(--text); font-variant-numeric: tabular-nums; }
+.allowance.over, .allowance.over b { color: var(--danger); }
+
+.dupe {
+  margin: -6px 0 12px;
+  padding: 8px 12px;
+  font-size: .82rem;
+  color: var(--warn, var(--danger));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 8px;
+}
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 8px 0 0; font-size: .9rem; }
 dt { color: var(--muted); }
@@ -476,6 +554,47 @@ pre {
 
 .r-tags { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
 .r-tags .tag { font-size: .72rem; padding: 2px 8px; }
+
+/* The original text, under the tidied name. Shown only when the two differ, so
+ * a rewrite is always visible and never silently replaces what was typed. */
+.r-raw {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  color: var(--muted);
+  font-size: .74rem;
+}
+
+/* ---------- history filters ---------- */
+
+.h-filter { display: grid; gap: 8px; margin-bottom: 14px; }
+.h-filter-row { display: flex; gap: 8px; }
+.h-filter-row select { flex: 1; min-width: 0; }
+
+.h-filter input,
+.h-filter select {
+  padding: 9px 11px;
+  font: inherit;
+  font-size: .86rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.h-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  font-size: .86rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.h-summary .num { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .h-edit {
   display: grid;
@@ -590,4 +709,38 @@ pre {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 5px;
+}
+
+/* Per-entry write-off, so one gift inside a run of four purchases can be
+ * dropped from a balance without erasing the other three. */
+.ledger-rows li { position: relative; }
+
+.l-settle {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  font-size: .74rem;
+}
+
+.ledger-rows li.settled .l-settle { color: var(--muted); }
+
+/* ---------- settings: budget ---------- */
+
+label.stack {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+label.stack input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }

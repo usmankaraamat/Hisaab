@@ -41,6 +41,17 @@ const REIMBURSEMENT =
 const BRACKETED = /^(.*?[^\s(])\s*\((?:for\s+)?([^)]+)\)\s*$/i;
 const FOR_CLAUSE = /^(.+?)\s+for\s+(.+)$/i;
 
+// The mirror of "for": "chicken piece from Harry 500" means Harry paid and the
+// debt runs the other way. Checked after REIMBURSEMENT, which is also a "from"
+// and means the opposite.
+const FROM_CLAUSE = /^(.+?)\s+from\s+(.+)$/i;
+
+// "Loan from Khuzaima" is cash arriving; "chicken piece from Harry" is not — a
+// colleague bought lunch, no money reached the wallet. Both are debts, but only
+// the first one changes what is in your pocket, so they cannot share a
+// direction. See budgetSummary, which is where that distinction is spent.
+const CASH_LOAN = /^(?:a\s+)?(?:loans?|cash|money|advances?|borrow(?:ed|ing)?|udhaar|qarz)$/i;
+
 /** Case-and-punctuation-insensitive identity for a person. */
 export function personKey(name) {
   return String(name ?? '')
@@ -106,6 +117,34 @@ export function parseForClause(name) {
   return { item, people, includesMe };
 }
 
+/**
+ * Read the "from <person>" clause: someone else paid for this.
+ *
+ * Only one person, deliberately. "Cake from Tom and Dick" would mean two people
+ * each covered part of one purchase, which is rare enough that guessing the
+ * split is worse than leaving it alone — whereas buying *for* several people at
+ * once is the common case the "for" clause exists to handle.
+ *
+ * @returns {{item: string, person: string, cashLoan: boolean}|null}
+ */
+export function parseFromClause(name) {
+  const text = String(name ?? '').trim();
+  if (!text) return null;
+  if (parseRoute(text)) return null;
+  // A reimbursement is also a "from" and means the opposite. It wins.
+  if (REIMBURSEMENT.test(text)) return null;
+
+  const match = FROM_CLAUSE.exec(text);
+  if (!match) return null;
+
+  const item = match[1].trim();
+  const names = parsePeople(match[2]);
+  if (!item || !names || names.length !== 1) return null;
+  if (ME.has(personKey(names[0]))) return null;
+
+  return { item, person: displayPerson(names[0]), cashLoan: CASH_LOAN.test(item) };
+}
+
 /** Read "reimbursement from <people>", the entry that cancels a share. */
 export function parseReimbursement(name) {
   const match = REIMBURSEMENT.exec(String(name ?? '').trim());
@@ -128,7 +167,8 @@ export function parseReimbursement(name) {
  * split rather than performing it. Two or more names, a name already known, or
  * an explicit "me" is evidence enough to split without asking.
  *
- * @returns {{kind: 'split'|'reimbursement', auto: boolean, people: string[],
+ * @returns {{kind: 'split'|'reimbursement'|'borrowed', auto: boolean,
+ *            item?: string, cashLoan?: boolean, people: string[],
  *            includesMe: boolean, rows: object[]}|null}
  */
 export function planEntry(name, amountMinor, direction = 'out', { knownPeople = [] } = {}) {
@@ -152,6 +192,34 @@ export function planEntry(name, amountMinor, direction = 'out', { knownPeople = 
         ledger_effect: 'repaid_by',
         category: 'Reimbursement',
       })),
+    };
+  }
+
+  // Someone else paid. One row, and the debt points the other way.
+  const from = parseFromClause(name);
+  if (from) {
+    return {
+      kind: 'borrowed',
+      // A cash loan says outright what it is; a purchase does not, so an
+      // unfamiliar name is offered rather than applied. "Chicken from Metro"
+      // must not mint a person called Metro.
+      auto: from.cashLoan || known.has(personKey(from.person)),
+      item: from.item,
+      cashLoan: from.cashLoan,
+      people: [from.person],
+      includesMe: false,
+      rows: [
+        {
+          raw_name: name,
+          amount_minor: amountMinor,
+          // Cash arriving vs a purchase someone else funded. Only the first one
+          // changes what is in the wallet.
+          direction: from.cashLoan ? 'in' : 'out',
+          counterparty_name: from.person,
+          ledger_effect: 'borrowed',
+          category: from.cashLoan ? 'Transfers & Loans' : null,
+        },
+      ],
     };
   }
 
@@ -189,5 +257,5 @@ export function planEntry(name, amountMinor, direction = 'out', { knownPeople = 
     });
   }
 
-  return { kind: 'split', auto, people, includesMe, rows };
+  return { kind: 'split', auto, item, people, includesMe, rows };
 }

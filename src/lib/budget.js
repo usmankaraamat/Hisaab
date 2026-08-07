@@ -1,0 +1,232 @@
+/* What is actually left, and what is safe to spend today.
+ *
+ * The reason this is not one number: in the live data, 83,300 of 121,676 rupees
+ * "spent" was an investment, a remittance and a loan. A balance that treats
+ * those as consumption is wrong on day one, and a number you have caught lying
+ * once is a number you stop reading. So four are computed and each says a
+ * different true thing:
+ *
+ *   cash        everything that left or entered the wallet. The honest total.
+ *   spend       consumption only — savings, transfers and money lent out and
+ *               still owed are all excluded.
+ *   committed   recurring charges already known to be due before the next
+ *               income. Spoken for, even though it has not left yet.
+ *   safe        cash − committed − the savings target not yet met.
+ *
+ * `safe / daysLeft` is the one figure that belongs under the capture input,
+ * because it is the only one that can change a decision at the moment of
+ * spending.
+ *
+ * Savings is deducted before the allowance, not left over after it. That
+ * inversion is the whole point: the app exists because saving what is left at
+ * the end of the month does not work.
+ *
+ * Pure functions over rows, so they run offline and are checked in verify.mjs.
+ */
+
+import { subscriptions } from './insights.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/* Money out that was not consumed. Kept out of `spend` so the burn rate means
+ * what it looks like it means. See CATEGORIES in the enrichment prompt. */
+export const NON_SPEND = new Set(['Savings', 'Transfers & Loans']);
+
+const live = (rows) => rows.filter((r) => !r.deleted);
+
+/** Money out you expect back: lent, not yet written off, not yet repaid. */
+export function isOutstandingLoan(row) {
+  return row.direction === 'out' && row.ledger_effect === 'lent' && !row.ledger_settled;
+}
+
+/**
+ * When the money last arrived, and when it is next expected.
+ *
+ * Anchoring to income rather than the calendar is deliberate: a salary landing
+ * on the 3rd makes "this month" the wrong window, and every allowance computed
+ * from it wrong for the first three days.
+ */
+export function incomePeriod(rows, now = new Date()) {
+  const at = now.getTime();
+  const incomes = live(rows)
+    .filter((r) => r.direction === 'in' && r.category === 'Income')
+    .map((r) => new Date(r.occurred_at).getTime())
+    .filter((t) => t <= at)
+    .sort((a, b) => a - b);
+
+  if (!incomes.length) return { lastIncomeAt: null, nextIncomeAt: null, everyDays: null };
+
+  const last = incomes.at(-1);
+
+  // Two or more payments give a real cycle. One gives a monthly assumption,
+  // which is right for a salary and harmless for anything else.
+  let everyDays = 30;
+  if (incomes.length >= 2) {
+    const gaps = [];
+    for (let i = 1; i < incomes.length; i++) gaps.push(Math.round((incomes[i] - incomes[i - 1]) / DAY_MS));
+    gaps.sort((a, b) => a - b);
+    const mid = gaps[Math.floor(gaps.length / 2)];
+    if (mid >= 6) everyDays = mid;
+  }
+
+  // Same day next month beats "+30 days", which drifts a salary date backwards.
+  let next = new Date(last);
+  if (everyDays >= 26 && everyDays <= 35) next.setMonth(next.getMonth() + 1);
+  else next = new Date(last + everyDays * DAY_MS);
+
+  return { lastIncomeAt: new Date(last).toISOString(), nextIncomeAt: next.toISOString(), everyDays };
+}
+
+/**
+ * @param rows      every local transaction
+ * @param opening   `{ amountMinor, at }` — what the wallet held at that instant.
+ *                  Overrides the income anchor when it is the later of the two,
+ *                  so a correction made today is not undone by last month's pay.
+ */
+export function budgetSummary(
+  rows,
+  { opening = null, savingsTargetMinor = 0, now = new Date() } = {}
+) {
+  const all = live(rows);
+  const period = incomePeriod(all, now);
+
+  const openingAt = opening?.at ? new Date(opening.at).getTime() : null;
+  const incomeAt = period.lastIncomeAt ? new Date(period.lastIncomeAt).getTime() : null;
+
+  let sinceMs;
+  let baseMinor;
+  if (openingAt !== null && (incomeAt === null || openingAt >= incomeAt)) {
+    sinceMs = openingAt;
+    baseMinor = opening.amountMinor;
+  } else if (incomeAt !== null) {
+    sinceMs = incomeAt;
+    baseMinor = 0;
+  } else {
+    sinceMs = -Infinity;
+    baseMinor = opening?.amountMinor ?? 0;
+  }
+
+  const inPeriod = all.filter((r) => new Date(r.occurred_at).getTime() >= sinceMs);
+
+  let inMinor = 0;
+  let outMinor = 0;
+  let incomeMinor = 0;
+  let spendMinor = 0;
+  let savedMinor = 0;
+  let transferMinor = 0;
+  let lentOutMinor = 0;
+  let owedByMeMinor = 0;
+  let fundedByOthersMinor = 0;
+
+  for (const r of inPeriod) {
+    if (r.direction === 'in') {
+      inMinor += r.amount_minor;
+      // A repayment is money returning, not money earned. Counting it as income
+      // would make a month look richer every time a friend settled up.
+      if (!r.ledger_effect) incomeMinor += r.amount_minor;
+      continue;
+    }
+
+    // "chicken piece from Harry 500" — Harry paid. Nothing left the wallet, so
+    // it reduces neither cash nor spend; it raises a debt instead. When the
+    // repayment is logged it is an ordinary outgoing, and that is what costs.
+    if (r.ledger_effect === 'borrowed') {
+      fundedByOthersMinor += r.amount_minor;
+      if (!r.ledger_settled) owedByMeMinor += r.amount_minor;
+      continue;
+    }
+
+    outMinor += r.amount_minor;
+    if (r.category === 'Savings') savedMinor += r.amount_minor;
+    else if (r.category === 'Transfers & Loans') transferMinor += r.amount_minor;
+    else if (isOutstandingLoan(r)) lentOutMinor += r.amount_minor;
+    else spendMinor += r.amount_minor;
+  }
+
+  const cashMinor = baseMinor + inMinor - outMinor;
+
+  const nextIncomeMs = period.nextIncomeAt ? new Date(period.nextIncomeAt).getTime() : null;
+  const daysLeft =
+    nextIncomeMs === null ? null : Math.max(1, Math.ceil((nextIncomeMs - now.getTime()) / DAY_MS));
+
+  // Recurring charges already due inside this period. `subscriptions` reads the
+  // whole history on purpose — a cycle cannot be detected from one period.
+  const horizon = nextIncomeMs ?? now.getTime() + 30 * DAY_MS;
+  const committed = subscriptions(all, { now })
+    .filter((s) => !s.lapsed)
+    .filter((s) => {
+      const due = new Date(s.nextDue).getTime();
+      return due > now.getTime() && due <= horizon;
+    });
+  const committedMinor = committed.reduce((a, s) => a + s.lastMinor, 0);
+
+  const savingsRemainingMinor = Math.max(0, savingsTargetMinor - savedMinor);
+  // Money owed to other people is as spoken for as a bill that has not arrived
+  // yet. Money owed *to* you is not added back — it may never come, and a
+  // spending limit should never be inflated by an optimistic assumption.
+  const safeToSpendMinor =
+    cashMinor - committedMinor - savingsRemainingMinor - owedByMeMinor;
+
+  return {
+    since: sinceMs === -Infinity ? null : new Date(sinceMs).toISOString(),
+    anchoredTo: sinceMs === openingAt ? 'opening' : incomeAt !== null ? 'income' : 'none',
+    ...period,
+    daysLeft,
+
+    baseMinor,
+    inMinor,
+    outMinor,
+    cashMinor,
+
+    incomeMinor,
+    spendMinor,
+    savedMinor,
+    transferMinor,
+    lentOutMinor,
+    owedByMeMinor,
+    fundedByOthersMinor,
+
+    committed,
+    committedMinor,
+    savingsTargetMinor,
+    savingsRemainingMinor,
+    safeToSpendMinor,
+    // Rounded to the rupee: a daily allowance quoted to the paisa is false
+    // precision, and it changes every time the page repaints.
+    dailyMinor: daysLeft ? Math.floor(safeToSpendMinor / daysLeft / 100) * 100 : null,
+  };
+}
+
+/**
+ * Consumption per category over a window, biggest first.
+ *
+ * Uncategorised rows are reported under their own heading rather than dropped —
+ * a breakdown that silently omits rows the model has not reached yet does not
+ * add up to what the History tab shows, and that is worse than an ugly bucket.
+ *
+ * Totals here reconcile with `spendMinor` above, which is why the same three
+ * exclusions apply: savings and transfers were not consumed, money still owed
+ * back to you was not yours to spend, and a purchase someone else paid for
+ * never left your wallet at all.
+ */
+export function categoryTotals(rows, { from = null, to = null, includeNonSpend = false } = {}) {
+  const fromMs = from ? new Date(from).getTime() : -Infinity;
+  const toMs = to ? new Date(to).getTime() : Infinity;
+  const totals = new Map();
+
+  for (const r of live(rows)) {
+    if (r.direction !== 'out') continue;
+    if (!includeNonSpend && NON_SPEND.has(r.category)) continue;
+    if (!includeNonSpend && (isOutstandingLoan(r) || r.ledger_effect === 'borrowed')) continue;
+    const at = new Date(r.occurred_at).getTime();
+    if (at < fromMs || at > toMs) continue;
+
+    const key = r.category || 'Uncategorised';
+    const t = totals.get(key) || { category: key, totalMinor: 0, count: 0 };
+    t.totalMinor += r.amount_minor;
+    t.count++;
+    totals.set(key, t);
+  }
+
+  return [...totals.values()].sort((a, b) => b.totalMinor - a.totalMinor);
+}

@@ -7,7 +7,7 @@
  */
 
 import { parseEntry } from './parse.js';
-import { planEntry, parseReimbursement } from './split.js';
+import { planEntry, parseReimbursement, parseFromClause } from './split.js';
 import { frequentAmounts, knownNames, suggestChips, invalidate } from './predict.js';
 import {
   addTransaction,
@@ -15,9 +15,13 @@ import {
   deleteTransaction,
   listTransactions,
   allTransactions,
+  getMeta,
 } from '../db/local.js';
 import { formatMinor, formatTxnAmount } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
+import { budgetSummary } from '../lib/budget.js';
+import { findDuplicate } from '../lib/dupes.js';
+import { txnLabel } from '../lib/label.js';
 
 const RELATIVE = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 
@@ -55,6 +59,7 @@ export async function renderAdd(root) {
         <div class="split" id="split" role="status" hidden></div>
 
         <p class="surge" id="surge" role="status" hidden></p>
+        <p class="dupe" id="dupe" role="status" hidden></p>
 
         <div class="direction" role="group" aria-label="Direction">
           <button type="button" data-dir="out" class="active">Spent</button>
@@ -69,6 +74,8 @@ export async function renderAdd(root) {
       </form>
 
       <div class="toast" id="toast" hidden></div>
+
+      <p class="allowance" id="allowance" hidden></p>
 
       <h2 class="recent-head">Recent</h2>
       <ul class="recent" id="recent"></ul>
@@ -87,6 +94,8 @@ export async function renderAdd(root) {
   const datalist = root.querySelector('#known-names');
   const warning = root.querySelector('#surge');
   const splitBox = root.querySelector('#split');
+  const dupeBox = root.querySelector('#dupe');
+  const allowance = root.querySelector('#allowance');
 
   let direction = 'out';
   let toastTimer = null;
@@ -105,6 +114,11 @@ export async function renderAdd(root) {
     // gets the same override an explicit "+" does, so the preview cannot show a
     // minus on a row that will be saved as income.
     if (parseReimbursement(parsed.name)) {
+      return { ...parsed, direction: 'in', explicitDirection: true };
+    }
+    // "Loan from Khuzaima" is cash arriving. "Chicken piece from Harry" is not —
+    // Harry paid, so it is still an expense, just one someone else funded.
+    if (parseFromClause(parsed.name)?.cashLoan) {
       return { ...parsed, direction: 'in', explicitDirection: true };
     }
     // An explicit +/- in the text wins over the toggle.
@@ -136,23 +150,31 @@ export async function renderAdd(root) {
       )
       .join('');
 
-    const heading =
-      plan.kind === 'reimbursement'
-        ? `Cancels what ${escapeHtml(plan.people.join(', '))} owed you`
-        : on
-          ? `Split ${plan.rows.length} ways${plan.includesMe ? ', including your share' : ' — all owed back to you'}`
-          : `Split between ${escapeHtml(plan.people.join(', '))}?`;
+    const who = escapeHtml(plan.people.join(', '));
+    let heading;
+    if (plan.kind === 'reimbursement') heading = `Cancels what ${who} owed you`;
+    else if (plan.kind === 'borrowed') {
+      heading = on
+        ? `${who} paid — you owe them${plan.cashLoan ? '' : ', nothing left your wallet'}`
+        : `Did ${who} pay for this?`;
+    } else {
+      heading = on
+        ? `Split ${plan.rows.length} ways${plan.includesMe ? ', including your share' : ' — all owed back to you'}`
+        : `Split between ${who}?`;
+    }
+
+    // Both guesses are offered rather than applied when the name is new, so a
+    // vendor ("chicken from Metro") never silently becomes a person.
+    const askable = plan.kind === 'split' || plan.kind === 'borrowed';
+    const toggleLabel =
+      plan.kind === 'borrowed' ? (on ? 'No, I paid' : 'Yes, they paid') : on ? 'Keep as one' : 'Split it';
 
     splitBox.innerHTML = `
       <div class="split-head">
         <span>${heading}</span>
-        ${
-          plan.kind === 'split'
-            ? `<button type="button" id="split-toggle" class="link">${on ? 'Keep as one' : 'Split it'}</button>`
-            : ''
-        }
+        ${askable ? `<button type="button" id="split-toggle" class="link">${toggleLabel}</button>` : ''}
       </div>
-      ${on || plan.kind === 'reimbursement' ? `<ul class="split-rows">${rows}</ul>` : ''}`;
+      ${on && plan.kind !== 'borrowed' ? `<ul class="split-rows">${rows}</ul>` : ''}`;
 
     splitBox.querySelector('#split-toggle')?.addEventListener('click', () => {
       splitOverride = !on;
@@ -184,11 +206,30 @@ export async function renderAdd(root) {
     // A shared expense or a reimbursement becomes several rows. Recomputed on
     // every keystroke so the breakdown is never stale, and the override is
     // dropped as soon as the entry stops being the one it was chosen for.
-    const before = plan && `${plan.kind}:${plan.people.join('|')}:${plan.includesMe}`;
+    const identity = (p) => p && `${p.kind}:${p.item ?? ''}:${p.people.join('|')}:${p.includesMe}`;
+    const before = identity(plan);
     plan = amountMinor === null ? null : planEntry(name, amountMinor, dir, { knownPeople: people });
-    const after = plan && `${plan.kind}:${plan.people.join('|')}:${plan.includesMe}`;
-    if (before !== after) splitOverride = null;
+    if (before !== identity(plan)) splitOverride = null;
     refreshSplit();
+
+    // Already entered? The live data has a 2,200 cake logged twice, thirty-five
+    // minutes apart. A split is compared at its total, because no single share
+    // of it matches the lump-sum row that duplicates it.
+    const commit = splitting() ? plan : null;
+    const dupe =
+      amountMinor === null
+        ? null
+        : findDuplicate(history, {
+            name: commit?.kind === 'split' ? commit.item : name,
+            amountMinor,
+            direction: dir,
+          });
+    dupeBox.hidden = !dupe;
+    if (dupe) {
+      dupeBox.innerHTML = `Already logged <b>${escapeHtml(dupe.label)}</b> for
+        ${formatMinor(dupe.amountMinor)} ${dupe.minutesAgo < 60 ? `${dupe.minutesAgo} min` : `${Math.round(dupe.minutesAgo / 60)} h`} ago.
+        Save again only if this is a second one.`;
+    }
 
     // Flag a fare well above what this route normally costs, before it is
     // saved rather than in a monthly report.
@@ -287,11 +328,42 @@ export async function renderAdd(root) {
     for (const r of rows) {
       const li = document.createElement('li');
       li.innerHTML = `
-        <span class="r-name">${escapeHtml(r.raw_name)}</span>
+        <span class="r-name">${escapeHtml(txnLabel(r))}</span>
         <span class="r-meta">${timeAgo(r.occurred_at)}</span>
         <span class="r-amt ${r.direction}">${formatTxnAmount(r)}</span>`;
       recentList.append(li);
     }
+  }
+
+  /**
+   * What is left, on the screen where money gets spent.
+   *
+   * A balance buried two taps away in a report is a balance nobody reads. The
+   * daily figure sits under the input because that is the only place it can
+   * change a decision — the moment before an entry is typed.
+   */
+  async function refreshAllowance() {
+    const [opening, target] = await Promise.all([
+      getMeta('budget.opening', null),
+      getMeta('budget.savingsTarget', 0),
+    ]);
+    const b = budgetSummary(history, { opening, savingsTargetMinor: Number(target) || 0 });
+
+    if (b.anchoredTo === 'none' || b.dailyMinor === null) {
+      allowance.hidden = true;
+      return;
+    }
+
+    const over = b.safeToSpendMinor < 0;
+    allowance.hidden = false;
+    allowance.className = `allowance${over ? ' over' : ''}`;
+    allowance.innerHTML = over
+      ? `<b>${formatMinor(-b.safeToSpendMinor)} over</b> with ${b.daysLeft} day${
+          b.daysLeft === 1 ? '' : 's'
+        } to go`
+      : `<b>${formatMinor(b.safeToSpendMinor)}</b> left · ${formatMinor(b.dailyMinor)} a day for ${
+          b.daysLeft
+        } day${b.daysLeft === 1 ? '' : 's'}`;
   }
 
   async function refreshNames() {
@@ -307,6 +379,7 @@ export async function renderAdd(root) {
       refreshChips(),
       refreshNames(),
       refreshSuggestions(),
+      refreshAllowance(),
     ]);
   }
 
@@ -333,9 +406,10 @@ export async function renderAdd(root) {
     input.focus();
 
     invalidate();
-    const summary = commit
-      ? `Saved ${formatMinor(amountMinor)} across ${written.length} entries`
-      : `Saved ${formatMinor(amountMinor)} · ${name}`;
+    const summary =
+      written.length > 1
+        ? `Saved ${formatMinor(amountMinor)} across ${written.length} entries`
+        : `Saved ${formatMinor(amountMinor)} · ${name}`;
     showToast(summary, {
       label: 'Undo',
       run: async () => {

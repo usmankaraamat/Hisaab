@@ -7,7 +7,7 @@ import {
   getMeta,
   setMeta,
 } from '../db/local.js';
-import { formatMinor } from '../lib/money.js';
+import { formatMinor, toMinor } from '../lib/money.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
@@ -21,6 +21,25 @@ export async function renderSettings(root) {
       <div class="card">
         <h3>Sync</h3>
         <div id="account"></div>
+      </div>
+
+      <div class="card">
+        <h3>Budget</h3>
+        <p class="hint">
+          "Money left" counts forward from your last income entry. Set an opening balance
+          if you want it anchored to what you actually hold instead — the later of the two wins.
+          A savings target is subtracted <em>before</em> the daily allowance, not left over after it.
+        </p>
+        <label class="stack">Opening balance
+          <input type="text" id="opening" inputmode="decimal" placeholder="e.g. 42000" />
+        </label>
+        <p class="hint" id="opening-at"></p>
+        <label class="stack">Savings target per period
+          <input type="text" id="target" inputmode="decimal" placeholder="e.g. 30000" />
+        </label>
+        <p id="budget-msg" class="hint"></p>
+        <button type="button" id="save-budget">Save</button>
+        <button type="button" id="clear-opening">Clear opening balance</button>
       </div>
 
       <div class="card">
@@ -52,6 +71,66 @@ export async function renderSettings(root) {
   const stats = root.querySelector('#stats');
   const result = root.querySelector('#import-result');
   const account = root.querySelector('#account');
+
+  /* Budget.
+   *
+   * The opening balance is stored with the instant it was stated, not just an
+   * amount. Without that timestamp there is no way to know which transactions
+   * it already accounts for, and every entry made before it would be
+   * double-counted against it. */
+  const openingInput = root.querySelector('#opening');
+  const openingAt = root.querySelector('#opening-at');
+  const targetInput = root.querySelector('#target');
+  const budgetMsg = root.querySelector('#budget-msg');
+
+  async function refreshBudget() {
+    const [opening, target] = await Promise.all([
+      getMeta('budget.opening', null),
+      getMeta('budget.savingsTarget', 0),
+    ]);
+    openingInput.value = opening ? String(opening.amountMinor / 100) : '';
+    openingAt.textContent = opening
+      ? `Counting from ${new Date(opening.at).toLocaleString()}.`
+      : 'Not set — counting from your last income entry.';
+    targetInput.value = Number(target) ? String(Number(target) / 100) : '';
+  }
+
+  root.querySelector('#save-budget').addEventListener('click', async () => {
+    const openingMinor = openingInput.value.trim() ? toMinor(openingInput.value) : null;
+    const targetMinor = targetInput.value.trim() ? toMinor(targetInput.value) : 0;
+
+    if (openingInput.value.trim() && (openingMinor === null || openingMinor < 0)) {
+      budgetMsg.className = 'warn';
+      budgetMsg.textContent = 'That opening balance is not a number.';
+      return;
+    }
+    if (targetMinor === null || targetMinor < 0) {
+      budgetMsg.className = 'warn';
+      budgetMsg.textContent = 'That savings target is not a number.';
+      return;
+    }
+
+    const existing = await getMeta('budget.opening', null);
+    if (openingMinor === null) {
+      await setMeta('budget.opening', null);
+    } else if (!existing || existing.amountMinor !== openingMinor) {
+      // Re-stamped only when the figure actually changed, so re-saving the page
+      // does not silently move the start of the period.
+      await setMeta('budget.opening', { amountMinor: openingMinor, at: new Date().toISOString() });
+    }
+    await setMeta('budget.savingsTarget', targetMinor);
+
+    await refreshBudget();
+    budgetMsg.className = 'ok';
+    budgetMsg.textContent = 'Saved.';
+  });
+
+  root.querySelector('#clear-opening').addEventListener('click', async () => {
+    await setMeta('budget.opening', null);
+    await refreshBudget();
+    budgetMsg.className = 'ok';
+    budgetMsg.textContent = 'Cleared. Counting from your last income entry.';
+  });
 
   async function refreshAccount() {
     if (!isConfigured()) {
@@ -198,7 +277,7 @@ export async function renderSettings(root) {
     await refreshStats();
   });
 
-  await Promise.all([refreshStats(), refreshAccount()]);
+  await Promise.all([refreshStats(), refreshAccount(), refreshBudget()]);
 }
 
 function pad(n, w = 2) {

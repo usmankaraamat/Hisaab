@@ -54,8 +54,19 @@ export const CASES = [
   { name: 'Indrive gym-flat', cat: ['Rides'], route: ride('indrive', 'Gym', 'Flat') },
 
   // ---- typos and casing must still hit the canonical route ----
-  { name: 'Yango Flat-Offic', cat: ['Rides'], route: ride('yango', 'Flat', 'Office') },
+  { name: 'Yango Flat-Offic', cat: ['Rides'], route: ride('yango', 'Flat', 'Office'),
+    display: 'Yango Flat → Office' },
   { name: 'indrive bus stop- flat', cat: ['Rides'], route: ride('indrive', 'Bus Stop', 'Flat') },
+
+  // ---- word order and provider spelling the user does not think about ----
+  // "home office indrive 180" is a real entry. The route resolved correctly all
+  // along; what was missing was anywhere to show the tidy version of it.
+  { name: 'home office indrive', amount: 180, cat: ['Rides'], route: ride('indrive', 'Home', 'Office'),
+    display: 'Indrive Home → Office' },
+  { name: 'gym to office indrive', amount: 200, cat: ['Rides'], route: ride('indrive', 'Gym', 'Office'),
+    display: 'Indrive Gym → Office' },
+  { name: 'Imdrive NUST - 26 Number', amount: 370, cat: ['Rides'], route: ride('indrive', 'NUST', '26 Number'),
+    display: 'Indrive NUST → 26 Number' },
 
   // ---- digits inside place names, not amounts ----
   { name: 'Indrive F10-26 Number', cat: ['Rides'], route: ride('indrive', 'F10', '26 Number') },
@@ -96,6 +107,27 @@ export const CASES = [
   { name: 'DSM-5 Book for sis', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
   { name: 'Slanty(for sis)', cat: 'any', ledger: 'lent', party: 'Sister', route: null },
   { name: 'Internet Bundle(Uzair)', cat: 'any', ledger: 'lent', party: 'Uzair', route: null },
+
+  // ---- bought FROM someone: they paid, so the debt runs the other way ----
+  // The mirror of the block above. A colleague covering lunch is as much a debt
+  // as lending cash, and the entry reads almost identically to buying *for*
+  // someone — one preposition apart.
+  { name: 'Chicken piece from Sameer', amount: 450, cat: 'any', ledger: 'borrowed', party: 'Sameer', route: null },
+  { name: 'Lunch from Khuzaima', amount: 600, cat: 'any', ledger: 'borrowed', party: 'Khuzaima', route: null },
+  // A vendor is not a person. This is the failure that would quietly invent a
+  // counterparty for every shop the user ever names.
+  { name: 'Burger from Hardees', amount: 950, cat: 'any', ledger: null, party: null, route: null },
+  { name: 'Chicken from Metro', amount: 1000, cat: ['Groceries'], ledger: null, party: null, route: null },
+
+  // ---- categories that used to have nowhere to go ----
+  // Every one of these was mis-filed in the live data because the category list
+  // was missing the right bucket, not because the model reasoned badly.
+  { name: 'movie tickets', amount: 1050, cat: ['Entertainment'], route: null, ledger: null, party: null },
+  { name: 'Investment', amount: 50000, cat: ['Savings'], route: null, ledger: null, party: null },
+  { name: 'Cashed Savings', amount: 10000, cat: ['Savings', 'Income', 'Other'], route: null, dir: 'in' },
+  { name: 'home remittance', amount: 33000, cat: ['Transfers & Loans'], route: null },
+  { name: '26 Number - Thokar Ticket', amount: 1806, cat: ['Travel'], route: null },
+  { name: 'Petrol', amount: 4000, cat: ['Fuel'], route: null },
 
   // ---- reimbursements ----
   { name: 'Reimbursement from Mutahhar Bhai', cat: ['Reimbursement'], party: 'Mutahhar Bhai', ledger: 'repaid_by', route: null, dir: 'in' },

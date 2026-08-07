@@ -155,6 +155,7 @@ function makeTransaction({
 
     // Everything below is filled in later by the enrichment pass.
     category,
+    display_name: null,
     item_id: null,
     route_id: null,
     counterparty_id: null,
@@ -260,6 +261,37 @@ export async function deleteTransaction(id) {
  * simply stops counting it. That is what actually happened when a shared treat
  * turns out to have been a gift.
  */
+/**
+ * Write off a single entry rather than a whole person.
+ *
+ * Buying four things for someone and meaning one of them as a gift is ordinary,
+ * and settling the person wholesale would erase the three that are still owed.
+ */
+export async function settleTransaction(id, { settled = 1 } = {}) {
+  const db = await openDB();
+  const { t, done } = tx(db, ['events', 'transactions'], 'readwrite');
+  const store = t.objectStore('transactions');
+  const row = await req(store.get(id));
+  if (!row) {
+    await done;
+    return null;
+  }
+  const now = new Date().toISOString();
+  const next = { ...row, ledger_settled: settled ? 1 : 0, updated_at: now, synced: 0 };
+  store.put(next);
+  // The same event type settleCounterparty writes, so a replay of the log does
+  // not have to know whether the user tapped one row or a whole person.
+  t.objectStore('events').put({
+    event_id: newId(),
+    type: settled ? 'ledger.settled' : 'ledger.reopened',
+    txn_id: id,
+    payload: { ledger_settled: settled ? 1 : 0 },
+    created_at: now,
+  });
+  await done;
+  return next;
+}
+
 export async function settleCounterparty(key, { settled = 1 } = {}) {
   const db = await openDB();
   const { t, done } = tx(db, ['events', 'transactions'], 'readwrite');

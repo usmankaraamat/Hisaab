@@ -3,17 +3,21 @@ import { renderAdd } from './capture/entry.js';
 import { renderHistory } from './views/history.js';
 import { renderSettings } from './views/settings.js';
 import { renderReview } from './views/review.js';
-import { renderInsights } from './views/insights.js';
 import { renderLedger } from './views/ledger.js';
+import { renderSpending } from './views/spending.js';
 import { startAutoSync } from './db/sync.js';
 import { setMeta } from './db/local.js';
 import { invalidate } from './capture/predict.js';
+import { parseHash, go } from './nav.js';
 
 const views = {
   add: renderAdd,
   history: renderHistory,
+  spending: renderSpending,
   ledger: renderLedger,
-  insights: renderInsights,
+  // "insights" was the old tab name; a bookmark or an installed shortcut can
+  // still be pointing at it.
+  insights: renderSpending,
   review: renderReview,
   settings: renderSettings,
 };
@@ -21,23 +25,24 @@ const views = {
 const view = document.querySelector('#view');
 const tabs = document.querySelector('#tabs');
 
-async function show(name) {
+async function show() {
+  const { name, params } = parseHash();
   const render = views[name] || views.add;
   for (const b of tabs.querySelectorAll('button')) {
     b.classList.toggle('active', b.dataset.tab === name);
   }
-  location.hash = name;
-  await render(view);
+  await render(view, params);
 }
 
 tabs.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-tab]');
-  if (btn) show(btn.dataset.tab);
+  // Always through the hash, so a tab tap clears any filter a link left behind.
+  if (btn) go(btn.dataset.tab);
 });
 
-window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'add'));
+window.addEventListener('hashchange', show);
 
-show(location.hash.slice(1) || 'add');
+show();
 
 // Sync runs entirely off the capture path — a failure here must never surface
 // as an error on the Add screen.
@@ -46,9 +51,7 @@ startAutoSync(async (result) => {
   await setMeta('sync.lastRun', new Date().toISOString());
   if (result.pulled > 0) {
     invalidate();
-    if ((location.hash.slice(1) || 'add') !== 'settings') {
-      await show(location.hash.slice(1) || 'add');
-    }
+    if (parseHash().name !== 'settings') await show();
   }
 });
 

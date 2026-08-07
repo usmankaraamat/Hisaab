@@ -78,16 +78,26 @@ const csv = parseCsv(readFileSync(csvPath, 'utf8').replace(/^﻿/, ''));
 const byName = new Map();
 for (const r of csv) if (!byName.has(r.Name)) byName.set(r.Name, r);
 
+/* Cases are pinned to the real export by default, so amounts and directions
+ * cannot drift into something convenient. A case may instead carry its own
+ * `amount` — that is for entries typed into Hisaab itself, which postdate the
+ * Bluecoins export and are the only evidence for behaviour the export never
+ * exercised (a purchase someone else paid for, a category that did not exist).
+ * They are still real entries, just from a newer source. */
+const FALLBACK_AT = '2026-08-05 12:00:00.000';
+
 const payload = CASES.map((c, i) => {
   const src = byName.get(c.name);
-  if (!src) throw new Error(`Case not present in the CSV: ${c.name}`);
-  const amount = Number(src.Amount);
+  if (!src && c.amount === undefined) {
+    throw new Error(`Case not in the CSV and has no amount of its own: ${c.name}`);
+  }
+  const amount = src ? Number(src.Amount) : (c.dir === 'in' ? c.amount : -c.amount);
   return {
     id: `t${String(i + 1).padStart(3, '0')}`,
     text: c.name,
     amount_pkr: Math.abs(amount),
     direction: amount < 0 ? 'out' : 'in',
-    at: src.Date,
+    at: src ? src.Date : FALLBACK_AT,
   };
 });
 const caseById = new Map(payload.map((p, i) => [p.id, CASES[i]]));
@@ -124,6 +134,7 @@ function grade(results) {
     route: [0, 0],
     counterparty: [0, 0],
     ledger: [0, 0],
+    display: [0, 0],
     calibration: [0, 0],
     collapse: [0, 0],
     distinct: [0, 0],
@@ -174,6 +185,18 @@ function grade(results) {
       if ((c.ledger ?? null) === (r.ledger_effect ?? null)) score.ledger[0]++;
       else { note(p.text, 'ledger', c.ledger, r.ledger_effect); wrong = true; }
     }
+
+    /* The tidy name shown in place of the raw text. Graded on every row for
+     * presence — an empty one puts the user back to reading their own typos —
+     * and against an exact expectation where the rewrite is the point of the
+     * case. Whitespace and arrow style are normalised; wording is not. */
+    score.display[1]++;
+    const shown = typeof r.display_name === 'string' ? r.display_name.trim() : '';
+    if (!shown) { note(p.text, 'display', 'non-empty', r.display_name); wrong = true; }
+    else if (c.display && norm(shown).replace(/[→>-]+/g, '>') !== norm(c.display).replace(/[→>-]+/g, '>')) {
+      note(p.text, 'display', c.display, shown);
+      wrong = true;
+    } else score.display[0]++;
 
     if (c.ambiguous) {
       score.calibration[1]++;
@@ -226,7 +249,7 @@ for (const model of MODELS) {
   const cost = price ? (inTok / 1e6) * price[0] + (outTok / 1e6) * price[1] : null;
 
   const pct = ([got, total]) => (total ? `${got}/${total} ${Math.round((got / total) * 100)}%` : '—');
-  const graded = ['category', 'route', 'counterparty', 'ledger', 'collapse', 'distinct'];
+  const graded = ['category', 'route', 'counterparty', 'ledger', 'display', 'collapse', 'distinct'];
   const totals = graded.reduce(
     (acc, k) => [acc[0] + score[k][0], acc[1] + score[k][1]],
     [0, 0]

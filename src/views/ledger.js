@@ -6,10 +6,11 @@
  * a split is captured, without waiting for a sync or an enrichment pass.
  */
 
-import { allTransactions, settleCounterparty } from '../db/local.js';
+import { allTransactions, settleCounterparty, settleTransaction } from '../db/local.js';
 import { balances, ledgerTotals } from '../lib/ledger.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
+import { txnLabel } from '../lib/label.js';
 import { syncNow } from '../db/sync.js';
 
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
@@ -40,7 +41,9 @@ async function paint(body) {
     body.innerHTML = `
       <p class="empty">Nothing owed either way.</p>
       <p class="hint">Type <code>cake for tom, dick, harry 2500</code> to split a shared
-      expense, then <code>reimbursement from tom 500</code> when they pay you back.</p>`;
+      expense, then <code>reimbursement from tom 500</code> when they pay you back.
+      The other way round works too: <code>chicken piece from harry 500</code> records
+      that Harry paid and you owe him.</p>`;
     return;
   }
 
@@ -67,16 +70,24 @@ function card(person, body) {
   const owed = person.netMinor > 0;
   const el = document.createElement('details');
   el.className = 'person';
+  el.dataset.key = person.key;
 
+  // Each entry can be written off on its own. Buying someone four things and
+  // meaning one as a gift is ordinary, and settling the whole person would
+  // erase the three that are still owed.
   const entries = person.rows
     .map(
       (r) => `
       <li class="${r.ledger_settled ? 'settled' : ''}">
-        <span class="l-name">${escapeHtml(r.raw_name)}</span>
+        <span class="l-name">${escapeHtml(txnLabel(r))}</span>
         <span class="l-meta">${DAY.format(new Date(r.occurred_at))} · ${EFFECT[r.ledger_effect] ?? r.ledger_effect}${
           r.ledger_settled ? ' · written off' : ''
         }</span>
         <span class="l-amt ${r.direction}">${formatMinor(r.amount_minor)}</span>
+        <button type="button" class="l-settle link" data-row="${r.id}" data-settled="${r.ledger_settled ? 1 : 0}"
+          aria-label="${r.ledger_settled ? 'Count' : 'Do not count'} ${escapeHtml(txnLabel(r))} in the balance">
+          ${r.ledger_settled ? 'Count it' : 'Write off'}
+        </button>
       </li>`
     )
     .join('');
@@ -106,6 +117,19 @@ function card(person, body) {
     syncNow().catch(() => {});
     await paint(body);
   });
+
+  for (const btn of el.querySelectorAll('.l-settle')) {
+    btn.addEventListener('click', async (e) => {
+      // The row sits inside <details>; without this the panel snaps shut.
+      e.preventDefault();
+      btn.disabled = true;
+      await settleTransaction(btn.dataset.row, { settled: btn.dataset.settled === '1' ? 0 : 1 });
+      syncNow().catch(() => {});
+      await paint(body);
+      // Keep the person the user was working in open across the repaint.
+      body.querySelector(`.person[data-key="${CSS.escape(person.key)}"]`)?.setAttribute('open', '');
+    });
+  }
 
   return el;
 }

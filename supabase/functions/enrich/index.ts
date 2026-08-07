@@ -194,6 +194,7 @@ Deno.serve(async (request: Request) => {
     transaction_id: r.id as string,
     proposed: {
       category: r.category,
+      display_name: r.display_name,
       canonical_item: r.canonical_item,
       route: r.route,
       counterparty: r.counterparty,
