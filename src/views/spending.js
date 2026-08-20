@@ -8,13 +8,18 @@
  *
  * The old Insights also carried a second, server-side people ledger. That is
  * now the Ledger tab's job, and it is gone from here: two screens computing the
- * same balance by different routes is a bug waiting to be reported.
+ * same balance by different routes is a bug waiting to be reported — and one
+ * that was in fact reported, when a sister read 4,050 on one screen and 4,600 on
+ * the other. So the division is now absolute. Anything still owed, either way,
+ * belongs to the Ledger and appears in no figure here. Anything written off has
+ * stopped being a balance and become an expense, and appears here under one
+ * heading.
  *
  * Everything on this screen reads IndexedDB, so it works offline.
  */
 
 import { allTransactions, getMeta } from '../db/local.js';
-import { budgetSummary, categoryTotals } from '../lib/budget.js';
+import { budgetSummary, categoryTotals, ON_OTHERS } from '../lib/budget.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
@@ -43,7 +48,6 @@ export async function renderSpending(root) {
   host.innerHTML = [
     leftCard(budget),
     breakdownCard(rows, budget),
-    peopleCard(budget),
     committedCard(budget),
     faresCard(rows),
     pricesCard(rows),
@@ -54,27 +58,25 @@ export async function renderSpending(root) {
   for (const el of host.querySelectorAll('[data-cat]')) {
     el.addEventListener('click', () => go('history', { cat: el.dataset.cat }));
   }
-  for (const el of host.querySelectorAll('[data-person]')) {
-    el.addEventListener('click', () => go('history', { person: el.dataset.person }));
-  }
 }
 
 /**
- * Who the outstanding balances are with.
+ * A pointer, not a second opinion.
  *
- * The totals above are netted per person, so "owed back to you 4,620" can be one
- * person or six. Naming them is what stops the figure reading as an abstraction
- * — and it is one tap from here to the Ledger, where it gets settled.
+ * What is outstanding in either direction lives on the Ledger and nowhere else —
+ * two screens netting the same debts by slightly different rules is what made
+ * one person read as 4,050 here and 4,600 there. Only the figure that enters
+ * this card's arithmetic is repeated: money you owe reduces what is safe to
+ * spend, while money owed to you deliberately does not increase it, so it has
+ * no business on this screen at all.
  */
-function peopleLine(b) {
-  const open = (b.people ?? []).filter((p) => p.netMinor !== 0);
-  if (!open.length) return '';
-  const names = open
-    .slice(0, 3)
-    .map((p) => escapeHtml(p.name))
-    .join(', ');
-  const more = open.length > 3 ? ` and ${open.length - 3} more` : '';
-  return `<p class="hint people-line">With ${names}${more}.</p>`;
+function ledgerLine(b) {
+  if (!b.owedToMeMinor && !b.iOweMinor) return '';
+  const parts = [
+    b.owedToMeMinor ? `${formatMinor(b.owedToMeMinor)} is owed back to you` : '',
+    b.iOweMinor ? `you owe ${formatMinor(b.iOweMinor)}` : '',
+  ].filter(Boolean);
+  return `<p class="hint people-line">${parts.join(' and ')} — see the Ledger.</p>`;
 }
 
 function card(title, inner, hint = '') {
@@ -140,9 +142,12 @@ function leftCard(b) {
            )
          : ''
      }
-     ${b.iOweMinor ? row('You owe people', `− ${formatMinor(b.iOweMinor)}`, 'up') : ''}
-     ${b.owedToMeMinor ? row('Owed back to you', formatMinor(b.owedToMeMinor), 'down') : ''}
-     ${peopleLine(b)}`,
+     ${
+       b.iOweMinor
+         ? row('Owed to other people', `− ${formatMinor(b.iOweMinor)}`, 'up')
+         : ''
+     }
+     ${ledgerLine(b)}`,
     `${period}${until ? `, next expected ${until}` : ''}.`
   );
 }
@@ -151,6 +156,10 @@ function leftCard(b) {
  * Where it went. Money that left the wallet without being consumed is listed
  * apart from spending — putting a 50,000 investment at the top of a spending
  * chart buries the twenty entries that are actually the habit.
+ *
+ * Everything bought for other people sits in one row rather than spread through
+ * Groceries, Health and Shopping, and only once it is written off: until then it
+ * is a debt, and debts are the Ledger's, not this screen's.
  */
 function breakdownCard(rows, b) {
   const spend = categoryTotals(rows, { from: b.since });
@@ -169,7 +178,9 @@ function breakdownCard(rows, b) {
           <span class="num">${formatMinor(c.totalMinor)}</span>
         </span>
         <span class="cat-bar"><span style="width:${pct}%"></span></span>
-        <span class="cat-sub">${c.count} entr${c.count === 1 ? 'y' : 'ies'} · ${pct}%</span>
+        <span class="cat-sub">${c.count} entr${c.count === 1 ? 'y' : 'ies'} · ${pct}%${
+          c.category === ON_OTHERS ? ' · written off, not coming back' : ''
+        }</span>
       </button>`;
     })
     .join('');
@@ -179,70 +190,19 @@ function breakdownCard(rows, b) {
     // Net of redemptions, so this flips rather than showing a negative "saved".
     b.savedMinor < 0 ? row('Taken back out of savings', formatMinor(-b.savedMinor), 'up') : '',
     b.transferMinor ? row('Transferred or lent', formatMinor(b.transferMinor)) : '',
-    b.sharedMinor ? row('Spent on other people', formatMinor(b.sharedMinor)) : '',
-    b.fundedByOthersMinor ? row('Paid for by other people', formatMinor(b.fundedByOthersMinor)) : '',
+    /* Nothing outstanding appears here, in either direction. A period-gross
+     * "still owed 6,440" sitting a screen away from the Ledger's netted 4,050
+     * is the same trap as before, just relabelled. The one figure this screen
+     * shows is the Ledger's own, via ledgerLine above. */
   ].join('');
 
   return card(
     'Where it went',
     `<div class="cats">${bars}</div>
      ${aside ? `<div class="aside">${aside}</div>` : ''}`,
-    `${formatMinor(total)} on yourself. Tap a category to see the entries.${
-      aside ? ' Everything below the line is money that was set aside, moved, or spent on someone else.' : ''
+    `${formatMinor(total)} spent. Tap a category to see the entries.${
+      aside ? ' Below the line is money that moved without being spent.' : ''
     }`
-  );
-}
-
-/**
- * What went on other people, kept out of the categories above.
- *
- * Groceries for a sister are not your groceries. Mixed into the same bars they
- * bury the habit you are trying to see — a quarter of the live breakdown, spread
- * across six categories — and no amount of staring at "Groceries 12,885"
- * separates the two. Splitting them is also the honest read: one of those totals
- * you can decide to change, and the other you mostly cannot.
- *
- * The per-person figure is what each person cost you after what they handed
- * back — 1,500 spent on a sister who reimburses 500 reads as 1,000 — because
- * the question this card answers is where money is actually leaving, not how
- * much traffic went through. The running balance stays on the Ledger, which
- * also counts what they bought for you and does not reset with the period.
- */
-function peopleCard(b) {
-  if (!b.shared.length) return '';
-
-  const bars = b.shared
-    .map((p) => {
-      const pct = b.sharedMinor > 0
-        ? Math.max(0, Math.round((p.totalMinor / b.sharedMinor) * 100))
-        : 0;
-      return `<button type="button" class="cat" data-person="${escapeHtml(p.name)}">
-        <span class="cat-head">
-          <span class="cat-name">${escapeHtml(p.name)}</span>
-          <span class="num">${formatMinor(p.totalMinor)}</span>
-        </span>
-        <span class="cat-bar"><span style="width:${pct}%"></span></span>
-        <span class="cat-sub">${p.count} entr${p.count === 1 ? 'y' : 'ies'}${
-          p.totalMinor === 0 && p.repaidMinor
-            ? ' · paid back in full'
-            : p.repaidMinor
-              ? ` · ${formatMinor(p.spentMinor)} less ${formatMinor(p.repaidMinor)} back`
-              : ''
-        }${p.owedMinor ? ` · ${formatMinor(p.owedMinor)} still owed` : ''}</span>
-      </button>`;
-    })
-    .join('');
-
-  const split = [
-    b.giftedMinor ? row('Gifts and write-offs', formatMinor(b.giftedMinor)) : '',
-  ].join('');
-
-  return card(
-    'Spent on other people',
-    `<div class="cats">${bars}</div>
-     ${split ? `<div class="aside">${split}</div>` : ''}`,
-    `${formatMinor(b.sharedMinor)} this period after what came back, kept out of your
-     own categories. Tap a name for the entries; the running balance is on the Ledger.`
   );
 }
 

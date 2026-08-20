@@ -120,26 +120,38 @@ The savings target is deducted **before** the allowance, not left over after it.
 Saving what remains at the end of the month is exactly the thing that does not
 work.
 
-## Yours, and everyone else's
+## One number, one home
 
-Groceries for a sister are not your groceries. Mixed into the same bars they bury
-the habit you are trying to see — a quarter of the live breakdown, spread across
-six categories, with Groceries alone at 5,310 of 12,885. So **Where it went** is
-your own spending only, and everything bought for someone else is a card of its
-own, broken down per person.
+Spending and the Ledger used to both report what people owed, netted by slightly
+different rules, and they disagreed: one sister read 4,050 on one screen and
+4,600 on the other. The difference was whatever she had bought *for* the user —
+real, but invisible unless you knew to look for it. Two views of one number is
+worth less than one number.
 
-The line is drawn on the counterparty, not the ledger effect: a treat written off
-as a gift still was not shopping for you, and neither was a present the model
-tagged with a person but no debt.
+So the division is absolute:
 
-Each person's figure is **net of what they handed back** — 1,500 spent on a
-sister who reimburses 500 reads as 1,000 — because the question is where money is
-actually leaving, not how much traffic went through. It floors at zero, since
-somebody repaying more than they cost you this period is not a negative expense.
+- **Anything still owed**, in either direction, is the Ledger's and appears in no
+  figure on Spending. It is an asset, not an expense — money that left the wallet
+  but is coming back.
+- **Anything written off** has stopped being a balance and become an expense. It
+  appears on Spending under a single **On other people** heading, and nowhere
+  else.
 
-That figure is deliberately not their ledger balance. This one is bounded by the
-period and counts only money that left your wallet; the balance carries over from
-before and also counts what they bought for you.
+Writing a row off in the Ledger is therefore the one action that moves money
+across the line, which is also what it means in plain English: you have decided
+you are not getting it back.
+
+That heading is one row rather than a share of Groceries, Health and Shopping,
+because mixed in it buried the habit worth seeing — a quarter of the live
+breakdown across six categories, with Groceries alone at 5,310 of 12,885. The
+line is drawn on the counterparty, not the ledger effect: a treat written off as
+a gift still was not shopping for you, and neither was a present the model tagged
+with a person but no debt.
+
+Tapping a category on Spending opens History filtered to exactly the rows that
+bar counted, so a real category means *your* groceries. What you bought for
+other people is reachable under **On other people**, under **Owed back to you**,
+or by person.
 
 ## Entering the same thing twice
 

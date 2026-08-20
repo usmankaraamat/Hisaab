@@ -18,6 +18,7 @@ import { formatTxnAmount, formatMinor, toMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { txnLabel, hasRewrite } from '../lib/label.js';
 import { personKey } from '../capture/split.js';
+import { isSharedSpend, isWrittenOffShare, isOutstandingLoan, ON_OTHERS } from '../lib/budget.js';
 import { invalidate } from '../capture/predict.js';
 import { syncNow } from '../db/sync.js';
 
@@ -89,8 +90,28 @@ function toLocalInput(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/* Two headings that are not categories.
+ *
+ * Spending counts a row under "On other people" rather than under Groceries, so
+ * tapping through has to land on the same set or the two screens disagree about
+ * the same word. A real category therefore means *your* Groceries; what you
+ * bought for someone else is reachable under these, or by person. */
+const OWED = 'Owed back to you';
+
+function inGroup(r, group) {
+  if (group === ON_OTHERS) return isWrittenOffShare(r);
+  if (group === OWED) return isOutstandingLoan(r);
+  return false;
+}
+
 function matches(r) {
-  if (filter.category && (r.category || 'Uncategorised') !== filter.category) return false;
+  if (filter.category === ON_OTHERS || filter.category === OWED) {
+    if (!inGroup(r, filter.category)) return false;
+  } else if (filter.category) {
+    if ((r.category || 'Uncategorised') !== filter.category) return false;
+    // A category bar on Spending counts only what you spent on yourself.
+    if (isSharedSpend(r)) return false;
+  }
   // By key, not by string: the Spending card links in with whichever spelling
   // it saw first, and "sister" must not filter out "Sister".
   if (filter.person && personKey(r.counterparty_name) !== personKey(filter.person)) return false;
@@ -118,9 +139,12 @@ async function paint(body, controls) {
   const rows = await listTransactions({ limit: 2000 });
 
   if (controls) {
+    const groups = [ON_OTHERS, OWED].filter((g) => rows.some((r) => inGroup(r, g)));
     fillOptions(
       controls.cat,
-      [...new Set(rows.map((r) => r.category || 'Uncategorised'))].sort(),
+      [
+        ...new Set(rows.filter((r) => !isSharedSpend(r)).map((r) => r.category || 'Uncategorised')),
+      ].sort().concat(groups),
       filter.category,
       'All categories'
     );

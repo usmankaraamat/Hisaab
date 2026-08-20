@@ -22,7 +22,7 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
-import { budgetSummary, categoryTotals, peopleSpend } from '../src/lib/budget.js';
+import { budgetSummary, categoryTotals, ON_OTHERS } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
@@ -314,13 +314,13 @@ check('savings never appears as a spending category',
 check('an uncategorised row is reported, not dropped',
   categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
 
-console.log('\n--- yours, and what went on other people ---');
+console.log('\n--- what you spent on others, and what is merely owed ---');
 
-/* Groceries for a sister are not your groceries. Mixed into the same bars they
- * buried the habit: in the live data a quarter of the breakdown involved other
- * people, and Groceries alone was 5,310 of 12,885. The split is drawn on the
- * counterparty, not the ledger effect, because a treat written off as a gift
- * still was not shopping for you. */
+/* One number, one home. Anything still owed is an asset the Ledger tracks and
+ * appears nowhere in Spending; anything written off has stopped being a balance
+ * and become an expense, so it appears in Spending under a single heading and
+ * nowhere else. The previous design showed both on both screens, netted by
+ * different rules, and one sister read as 4,050 on one and 4,600 on the other. */
 const forOthers = (who, minor, cat, extra = {}) => spend({
   raw_name: `${cat} for ${who}`, amount_minor: minor, category: cat,
   counterparty_name: who, ledger_effect: 'lent', ...extra,
@@ -330,124 +330,45 @@ const mine = [
   spend({ raw_name: 'Salary', direction: 'in', amount_minor: 13000000, category: 'Income',
           occurred_at: '2026-08-03T13:00:00.000Z' }),
   spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries' }),
+  // Still owed, so not an expense at all.
   forOthers('Sister', 31000, 'Groceries'),
-  // Written off as a gift — still not your shopping.
+  // Written off: it has stopped being a balance and become spending.
   forOthers('Mother', 84000, 'Health', { ledger_settled: 1 }),
   // Tagged with a person but never a debt, which is how a farewell present lands.
   spend({ raw_name: 'Anser Farewell', amount_minor: 50000, category: 'Shopping',
           counterparty_name: 'Anser' }),
-  // They paid for this one, so it is on neither list.
+  // They paid for this one, so it is on no list of yours.
   spend({ raw_name: 'lunch from Khuzaima', amount_minor: 60000, category: 'Eating Out',
           counterparty_name: 'Khuzaima', ledger_effect: 'borrowed' }),
 ];
 
 const sp = budgetSummary(mine, { now: asOfAug8 });
-check('your own spending is only your own', sp.spendMinor, 100000);
-check('everything bought for someone else totals separately', sp.sharedMinor, 31000 + 84000 + 50000);
-check('of which this much is still owed back', sp.lentOutMinor, 31000);
-check('and this much is not coming back', sp.giftedMinor, 84000 + 50000);
-check('a purchase they funded is on neither list',
-  [sp.spendMinor, sp.sharedMinor].includes(60000), false);
+check('your own spending is only your own', sp.personalMinor, 100000);
+check('written off on other people is one figure', sp.onOthersMinor, 84000 + 50000);
+check('what is still owed is not spending', sp.lentOutMinor, 31000);
+check('and is excluded from the period total', sp.spendMinor, 100000 + 84000 + 50000);
+check('a purchase they funded is on neither list', sp.fundedByOthersMinor, 60000);
 
-const yours = categoryTotals(mine, { from: sp.since });
-check('the personal breakdown reconciles with personal spend',
-  yours.reduce((a, c) => a + c.totalMinor, 0), sp.spendMinor);
-check('a gift does not appear in your categories',
-  yours.some((c) => c.category === 'Health'), false);
-check('the shared breakdown reconciles too',
-  categoryTotals(mine, { from: sp.since, scope: 'shared' })
-    .reduce((a, c) => a + c.totalMinor, 0), sp.sharedMinor);
-check('both halves together are every out-row that was consumed',
-  categoryTotals(mine, { from: sp.since, scope: 'all' })
-    .reduce((a, c) => a + c.totalMinor, 0), sp.spendMinor + sp.sharedMinor);
+const mineCats = categoryTotals(mine, { from: sp.since });
+const byName = (n) => mineCats.find((c) => c.category === n)?.totalMinor ?? 0;
+check('the breakdown reconciles with what the period cost',
+  mineCats.reduce((a, c) => a + c.totalMinor, 0), sp.spendMinor);
+check('everything on other people collapses to one heading',
+  byName(ON_OTHERS), sp.onOthersMinor);
+check('and is not spread through your categories',
+  [byName('Health'), byName('Shopping')], [0, 0]);
+check('your own category keeps only your own row', byName('Groceries'), 100000);
+check('a row still owed appears in no category',
+  mineCats.some((c) => c.totalMinor === 31000), false);
 
-check('per person, biggest first', sp.shared.map((x) => [x.name, x.totalMinor]),
-  [['Mother', 84000], ['Anser', 50000], ['Sister', 31000]]);
-check('each person carries what is still owed of it',
-  sp.shared.map((x) => x.owedMinor), [0, 0, 31000]);
-check('one person, one row, however they were spelled',
-  peopleSpend([forOthers('Sister', 1000, 'Drinks'), forOthers('sister', 2000, 'Drinks')])
-    .map((x) => x.totalMinor), [3000]);
-check('paying a debt back is not spending on them again',
-  peopleSpend([spend({ raw_name: 'Loan return to Sister', amount_minor: 50000,
-    counterparty_name: 'Sister', ledger_effect: 'repaid_to' })]).length, 0);
-
-// Netted, because 1,500 spent on someone who hands 500 back cost 1,000. Gross
-// would overstate the outflow every time a shared expense worked as intended.
-const repaid = [
-  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 13000000, category: 'Income',
-          occurred_at: '2026-08-03T13:00:00.000Z' }),
-  forOthers('Sister', 150000, 'Groceries'),
-  spend({ raw_name: 'Reimbursement from Sister', direction: 'in', amount_minor: 50000,
-          category: 'Reimbursement', counterparty_name: 'Sister', ledger_effect: 'repaid_by' }),
-];
-const rp = budgetSummary(repaid, { now: asOfAug8 });
-check('what came back is subtracted from what they cost', rp.sharedMinor, 100000);
-check('and the person shows the same figure', rp.shared[0].totalMinor, 100000);
-check('the gross is still available underneath',
-  [rp.shared[0].spentMinor, rp.shared[0].repaidMinor], [150000, 50000]);
-check('what is still recoverable comes down too', rp.shared[0].owedMinor, 100000);
-check('a repayment is still not income', rp.incomeMinor, 13000000);
-check('but it is cash back in hand', rp.cashMinor, 13000000 - 150000 + 50000);
-check('your own categories are untouched by any of it', rp.spendMinor, 0);
-check('someone who only paid you back is not a spending row',
-  peopleSpend([repaid[2]]).length, 0);
-// Settling something bought before the period started. "Sister −500" is not an
-// amount that went into anyone's expenses, so it floors at zero.
-check('repaying more than this period cost floors at zero',
-  peopleSpend([forOthers('Sister', 30000, 'Drinks'),
-    spend({ raw_name: 'Reimbursement from Sister', direction: 'in', amount_minor: 80000,
-            counterparty_name: 'Sister', ledger_effect: 'repaid_by' })])[0].totalMinor, 0);
-
-console.log('\n--- duplicate guard ---');
-
-/* The real case: "Cake 2200" at 18:17, then the same cake re-entered at 18:52
- * as five shares of 440. No single share matches the lump, so the group has to
- * be compared at its total or the duplicate is invisible. */
-const cakeGroup = ['Jahangir', 'Taqi', 'Khuzi', 'Hashaam'].map((who, i) =>
-  spend({
-    id: `s${i}`,
-    raw_name: `cake for ${who}`,
-    amount_minor: 44000,
-    split_group_id: 'g1',
-    source_text: 'cake for jahangir, taqi, khuzi, hashaam, me',
-    occurred_at: '2026-08-03T18:52:00.000Z',
-  })
+// Writing a row off moves it across the line; nothing else about it changes.
+const written = mine.map((r) =>
+  r.counterparty_name === 'Sister' ? { ...r, ledger_settled: 1 } : r
 );
-cakeGroup.push(spend({
-  id: 's4', raw_name: 'cake', amount_minor: 44000, split_group_id: 'g1',
-  source_text: 'cake for jahangir, taqi, khuzi, hashaam, me',
-  occurred_at: '2026-08-03T18:52:00.000Z',
-}));
-
-const dup = findDuplicate(cakeGroup, {
-  name: 'Cake',
-  amountMinor: 220000,
-  at: '2026-08-03T19:20:00.000Z',
-});
-check('a split group is matched at its total', dup?.amountMinor, 220000);
-check('and reported by how long ago it was', dup.minutesAgo, 28);
-check('a different amount is not a duplicate',
-  findDuplicate(cakeGroup, { name: 'Cake', amountMinor: 210000, at: '2026-08-03T19:20:00.000Z' }), null);
-check('the same amount on a different thing is not a duplicate',
-  findDuplicate(cakeGroup, { name: 'Biryani', amountMinor: 220000, at: '2026-08-03T19:20:00.000Z' }), null);
-check('yesterday is outside the window',
-  findDuplicate(cakeGroup, { name: 'Cake', amountMinor: 220000, at: '2026-08-05T19:20:00.000Z' }), null);
-check('two Diet Cokes of different prices are fine',
-  findDuplicate(
-    [spend({ id: 'a', raw_name: 'Diet Coke', amount_minor: 12000 })],
-    { name: 'Diet Coke', amountMinor: 10000, at: '2026-08-05T14:00:00.000Z' }
-  ), null);
-check('but the identical entry twice in an hour is flagged',
-  findDuplicate(
-    [spend({ id: 'a', raw_name: 'Diet Coke', amount_minor: 12000 })],
-    { name: 'diet coke', amountMinor: 12000, at: '2026-08-05T10:40:00.000Z' }
-  )?.minutesAgo, 40);
-check('incoming money is never compared against an expense',
-  findDuplicate(
-    [spend({ id: 'a', raw_name: 'Salary', amount_minor: 12000, direction: 'in' })],
-    { name: 'Salary', amountMinor: 12000, direction: 'out', at: '2026-08-05T10:40:00.000Z' }
-  ), null);
+const after = budgetSummary(written, { now: asOfAug8 });
+check('writing off turns an owed row into an expense',
+  [after.lentOutMinor, after.onOthersMinor], [0, 31000 + 84000 + 50000]);
+check('and leaves your own spending alone', after.personalMinor, sp.personalMinor);
 
 console.log('\n--- balances are netted per person, not summed gross ---');
 

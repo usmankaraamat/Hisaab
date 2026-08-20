@@ -68,6 +68,28 @@ export function isSharedSpend(row) {
   );
 }
 
+/* The single heading everything spent on other people lands under, once it is
+ * clear it is not coming back. */
+export const ON_OTHERS = 'On other people';
+
+/**
+ * Money spent on someone else that you are never getting back: written off in
+ * the ledger, or tagged with a person but never recorded as a debt.
+ *
+ * The split between this and `isOutstandingLoan` is the whole shape of the app
+ * now. Anything still owed — in either direction — is the Ledger's business and
+ * appears nowhere in Spending; it is an asset, not an expense. Anything written
+ * off has stopped being a balance and become an expense, so it appears here and
+ * nowhere else.
+ *
+ * The earlier design tried to show both on both screens, netted differently on
+ * each, and the two figures disagreed by whatever the person had bought *for*
+ * you. One number, one home, is worth more than two views of it.
+ */
+export function isWrittenOffShare(row) {
+  return isSharedSpend(row) && !isOutstandingLoan(row);
+}
+
 /**
  * When the money last arrived, and when it is next expected.
  *
@@ -140,11 +162,11 @@ export function budgetSummary(
   let inMinor = 0;
   let outMinor = 0;
   let incomeMinor = 0;
-  let spendMinor = 0;
+  let personalMinor = 0;
+  let onOthersMinor = 0;
   let savedMinor = 0;
   let transferMinor = 0;
   let lentOutMinor = 0;
-  let giftedMinor = 0;
   let fundedByOthersMinor = 0;
 
   for (const r of inPeriod) {
@@ -178,12 +200,11 @@ export function budgetSummary(
     outMinor += r.amount_minor;
     if (r.category === 'Savings') savedMinor += r.amount_minor;
     else if (r.category === 'Transfers & Loans') transferMinor += r.amount_minor;
-    else if (isSharedSpend(r)) {
-      // The netted total comes from peopleSpend below; this only separates the
-      // part that can still come back from the part that never will.
-      if (isOutstandingLoan(r)) lentOutMinor += r.amount_minor;
-      else giftedMinor += r.amount_minor;
-    } else spendMinor += r.amount_minor;
+    // Still owed: an asset, not an expense. It belongs to the Ledger and is
+    // deliberately absent from every figure on the Spending screen.
+    else if (isOutstandingLoan(r)) lentOutMinor += r.amount_minor;
+    else if (isSharedSpend(r)) onOthersMinor += r.amount_minor;
+    else personalMinor += r.amount_minor;
   }
 
   const cashMinor = baseMinor + inMinor - outMinor;
@@ -219,9 +240,6 @@ export function budgetSummary(
   const book = balances(all);
   const owed = ledgerTotals(book);
 
-  // Netted per person: 1,500 spent on a sister who handed 500 back cost 1,000.
-  const shared = peopleSpend(all, { from: sinceMs === -Infinity ? null : new Date(sinceMs) });
-  const sharedMinor = shared.reduce((a, p) => a + p.totalMinor, 0);
 
   const savingsRemainingMinor = Math.max(0, savingsTargetMinor - savedMinor);
   // Money owed to other people is as spoken for as a bill that has not arrived
@@ -242,15 +260,18 @@ export function budgetSummary(
     cashMinor,
 
     incomeMinor,
-    spendMinor,
+    // What the period actually cost: your own consumption plus whatever you
+    // spent on other people and are not getting back.
+    spendMinor: personalMinor + onOthersMinor,
+    personalMinor,
+    onOthersMinor,
     savedMinor,
     transferMinor,
     // Gross outflow on other people's behalf this period — an answer to "where
     // did the money go", which is a different question from what is still owed.
+    // Outstanding, and therefore not spending. Reported so the Spending screen
+    // can point at the Ledger rather than quietly omitting the money.
     lentOutMinor,
-    giftedMinor,
-    sharedMinor,
-    shared,
     fundedByOthersMinor,
     // Net per person, all time. What is actually outstanding.
     owedToMeMinor: owed.owedToMeMinor,
@@ -275,30 +296,30 @@ export function budgetSummary(
  * a breakdown that silently omits rows the model has not reached yet does not
  * add up to what the History tab shows, and that is worse than an ugly bucket.
  *
- * Totals here reconcile with `spendMinor` above, which is why the same
- * exclusions apply: savings and transfers were not consumed, anything bought for
- * someone else belongs on its own list rather than inside your categories, and a
- * purchase someone else paid for never left your wallet at all.
+ * Everything spent on other people collapses into one `On other people` row
+ * rather than being spread through Groceries, Health and Shopping, where it
+ * buried the habit worth seeing — a quarter of the live breakdown across six
+ * categories. Only what is written off appears at all: money still owed is an
+ * asset the Ledger tracks, not an expense this screen should be counting.
  *
- * `scope: 'shared'` inverts the person test to get the other half.
+ * Totals here reconcile exactly with `spendMinor`.
  */
-export function categoryTotals(
-  rows,
-  { from = null, to = null, includeNonSpend = false, scope = 'personal' } = {}
-) {
+export function categoryTotals(rows, { from = null, to = null, includeNonSpend = false } = {}) {
   const fromMs = from ? new Date(from).getTime() : -Infinity;
   const toMs = to ? new Date(to).getTime() : Infinity;
   const totals = new Map();
 
   for (const r of live(rows)) {
     if (r.direction !== 'out') continue;
-    if (!includeNonSpend && NON_SPEND.has(r.category)) continue;
-    if (!includeNonSpend && r.ledger_effect === 'borrowed') continue;
-    if (scope !== 'all' && isSharedSpend(r) !== (scope === 'shared')) continue;
+    if (!includeNonSpend) {
+      if (NON_SPEND.has(r.category)) continue;
+      if (r.ledger_effect === 'borrowed') continue;
+      if (isOutstandingLoan(r)) continue;
+    }
     const at = new Date(r.occurred_at).getTime();
     if (at < fromMs || at > toMs) continue;
 
-    const key = r.category || 'Uncategorised';
+    const key = isWrittenOffShare(r) ? ON_OTHERS : r.category || 'Uncategorised';
     const t = totals.get(key) || { category: key, totalMinor: 0, count: 0 };
     t.totalMinor += r.amount_minor;
     t.count++;
@@ -306,78 +327,4 @@ export function categoryTotals(
   }
 
   return [...totals.values()].sort((a, b) => b.totalMinor - a.totalMinor);
-}
-
-/**
- * What each person actually cost you over a window, biggest first.
- *
- * Net of what they handed back: spending 1,500 on a sister who reimburses 500
- * cost 1,000, and reporting 1,500 would overstate the outflow every time a
- * shared expense worked as intended. That netting is the whole point of the
- * card — it shows where money is genuinely leaving rather than circulating.
- *
- * Still not the same number as their ledger balance, and deliberately so. This
- * is bounded by the period and counts only money that moved out of your wallet;
- * a balance carries over from before and also counts what they bought for you.
- * Both are true, and the card says which one it is showing.
- */
-export function peopleSpend(rows, { from = null, to = null } = {}) {
-  const fromMs = from ? new Date(from).getTime() : -Infinity;
-  const toMs = to ? new Date(to).getTime() : Infinity;
-  const people = new Map();
-
-  const entry = (name) => {
-    const key = personKey(name);
-    if (!key) return null;
-    if (!people.has(key)) {
-      people.set(key, {
-        key,
-        name: String(name).trim(),
-        totalMinor: 0,
-        spentMinor: 0,
-        repaidMinor: 0,
-        owedMinor: 0,
-        count: 0,
-      });
-    }
-    return people.get(key);
-  };
-
-  for (const r of live(rows)) {
-    const at = new Date(r.occurred_at).getTime();
-    if (at < fromMs || at > toMs) continue;
-
-    if (isSharedSpend(r)) {
-      const p = entry(r.counterparty_name);
-      if (!p) continue;
-      p.spentMinor += r.amount_minor;
-      if (isOutstandingLoan(r)) p.owedMinor += r.amount_minor;
-      p.count++;
-      continue;
-    }
-
-    // Money they handed back. Subtracted rather than listed, because what the
-    // user asked of this card is the cost, not the gross traffic.
-    if (r.direction === 'in' && r.ledger_effect === 'repaid_by' && r.counterparty_name) {
-      const p = entry(r.counterparty_name);
-      if (p) p.repaidMinor += r.amount_minor;
-    }
-  }
-
-  for (const p of people.values()) {
-    /* Floored at zero. Somebody can repay more than they cost you this period —
-     * they are settling something bought before it started — and "Sister −500"
-     * under the heading "spent on other people" is not an amount that went into
-     * anyone's expenses. The surplus is already visible where it belongs, in
-     * cash and on the Ledger. */
-    p.totalMinor = Math.max(0, p.spentMinor - p.repaidMinor);
-    // What is still recoverable, after what has already come back. The Ledger is
-    // the authority on the balance; this is the in-period view of it.
-    p.owedMinor = Math.max(0, p.owedMinor - p.repaidMinor);
-  }
-
-  // Someone who only paid you back this period is not a spending row at all.
-  return [...people.values()]
-    .filter((p) => p.spentMinor > 0)
-    .sort((a, b) => b.totalMinor - a.totalMinor || a.name.localeCompare(b.name));
 }
