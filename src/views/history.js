@@ -17,6 +17,7 @@ import { listTransactions, deleteTransaction, updateTransaction } from '../db/lo
 import { formatTxnAmount, formatMinor, toMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { txnLabel, hasRewrite } from '../lib/label.js';
+import { personKey } from '../capture/split.js';
 import { invalidate } from '../capture/predict.js';
 import { syncNow } from '../db/sync.js';
 
@@ -90,7 +91,9 @@ function toLocalInput(iso) {
 
 function matches(r) {
   if (filter.category && (r.category || 'Uncategorised') !== filter.category) return false;
-  if (filter.person && r.counterparty_name !== filter.person) return false;
+  // By key, not by string: the Spending card links in with whichever spelling
+  // it saw first, and "sister" must not filter out "Sister".
+  if (filter.person && personKey(r.counterparty_name) !== personKey(filter.person)) return false;
   if (filter.text) {
     const needle = filter.text.toLowerCase();
     const hay = `${r.raw_name} ${r.display_name ?? ''} ${r.category ?? ''} ${r.counterparty_name ?? ''}`;

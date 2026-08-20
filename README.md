@@ -120,6 +120,27 @@ The savings target is deducted **before** the allowance, not left over after it.
 Saving what remains at the end of the month is exactly the thing that does not
 work.
 
+## Yours, and everyone else's
+
+Groceries for a sister are not your groceries. Mixed into the same bars they bury
+the habit you are trying to see — a quarter of the live breakdown, spread across
+six categories, with Groceries alone at 5,310 of 12,885. So **Where it went** is
+your own spending only, and everything bought for someone else is a card of its
+own, broken down per person.
+
+The line is drawn on the counterparty, not the ledger effect: a treat written off
+as a gift still was not shopping for you, and neither was a present the model
+tagged with a person but no debt.
+
+Each person's figure is **net of what they handed back** — 1,500 spent on a
+sister who reimburses 500 reads as 1,000 — because the question is where money is
+actually leaving, not how much traffic went through. It floors at zero, since
+somebody repaying more than they cost you this period is not a negative expense.
+
+That figure is deliberately not their ledger balance. This one is bounded by the
+period and counts only money that left your wallet; the balance carries over from
+before and also counts what they bought for you.
+
 ## Entering the same thing twice
 
 `Cake 2200` was entered, and thirty-five minutes later the same cake was entered

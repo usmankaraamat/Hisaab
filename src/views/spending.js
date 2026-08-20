@@ -43,6 +43,7 @@ export async function renderSpending(root) {
   host.innerHTML = [
     leftCard(budget),
     breakdownCard(rows, budget),
+    peopleCard(budget),
     committedCard(budget),
     faresCard(rows),
     pricesCard(rows),
@@ -52,6 +53,9 @@ export async function renderSpending(root) {
   // point of having categories at all.
   for (const el of host.querySelectorAll('[data-cat]')) {
     el.addEventListener('click', () => go('history', { cat: el.dataset.cat }));
+  }
+  for (const el of host.querySelectorAll('[data-person]')) {
+    el.addEventListener('click', () => go('history', { person: el.dataset.person }));
   }
 }
 
@@ -175,7 +179,7 @@ function breakdownCard(rows, b) {
     // Net of redemptions, so this flips rather than showing a negative "saved".
     b.savedMinor < 0 ? row('Taken back out of savings', formatMinor(-b.savedMinor), 'up') : '',
     b.transferMinor ? row('Transferred or lent', formatMinor(b.transferMinor)) : '',
-    b.lentOutMinor ? row('Paid for other people', formatMinor(b.lentOutMinor)) : '',
+    b.sharedMinor ? row('Spent on other people', formatMinor(b.sharedMinor)) : '',
     b.fundedByOthersMinor ? row('Paid for by other people', formatMinor(b.fundedByOthersMinor)) : '',
   ].join('');
 
@@ -183,9 +187,62 @@ function breakdownCard(rows, b) {
     'Where it went',
     `<div class="cats">${bars}</div>
      ${aside ? `<div class="aside">${aside}</div>` : ''}`,
-    `${formatMinor(total)} spent. Tap a category to see the entries.${
-      aside ? ' Money set aside or owed back is listed separately — it was not consumed.' : ''
+    `${formatMinor(total)} on yourself. Tap a category to see the entries.${
+      aside ? ' Everything below the line is money that was set aside, moved, or spent on someone else.' : ''
     }`
+  );
+}
+
+/**
+ * What went on other people, kept out of the categories above.
+ *
+ * Groceries for a sister are not your groceries. Mixed into the same bars they
+ * bury the habit you are trying to see — a quarter of the live breakdown, spread
+ * across six categories — and no amount of staring at "Groceries 12,885"
+ * separates the two. Splitting them is also the honest read: one of those totals
+ * you can decide to change, and the other you mostly cannot.
+ *
+ * The per-person figure is what each person cost you after what they handed
+ * back — 1,500 spent on a sister who reimburses 500 reads as 1,000 — because
+ * the question this card answers is where money is actually leaving, not how
+ * much traffic went through. The running balance stays on the Ledger, which
+ * also counts what they bought for you and does not reset with the period.
+ */
+function peopleCard(b) {
+  if (!b.shared.length) return '';
+
+  const bars = b.shared
+    .map((p) => {
+      const pct = b.sharedMinor > 0
+        ? Math.max(0, Math.round((p.totalMinor / b.sharedMinor) * 100))
+        : 0;
+      return `<button type="button" class="cat" data-person="${escapeHtml(p.name)}">
+        <span class="cat-head">
+          <span class="cat-name">${escapeHtml(p.name)}</span>
+          <span class="num">${formatMinor(p.totalMinor)}</span>
+        </span>
+        <span class="cat-bar"><span style="width:${pct}%"></span></span>
+        <span class="cat-sub">${p.count} entr${p.count === 1 ? 'y' : 'ies'}${
+          p.totalMinor === 0 && p.repaidMinor
+            ? ' · paid back in full'
+            : p.repaidMinor
+              ? ` · ${formatMinor(p.spentMinor)} less ${formatMinor(p.repaidMinor)} back`
+              : ''
+        }${p.owedMinor ? ` · ${formatMinor(p.owedMinor)} still owed` : ''}</span>
+      </button>`;
+    })
+    .join('');
+
+  const split = [
+    b.giftedMinor ? row('Gifts and write-offs', formatMinor(b.giftedMinor)) : '',
+  ].join('');
+
+  return card(
+    'Spent on other people',
+    `<div class="cats">${bars}</div>
+     ${split ? `<div class="aside">${split}</div>` : ''}`,
+    `${formatMinor(b.sharedMinor)} this period after what came back, kept out of your
+     own categories. Tap a name for the entries; the running balance is on the Ledger.`
   );
 }
 
