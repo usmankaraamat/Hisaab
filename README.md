@@ -103,6 +103,14 @@ computed:
 | **committed** | recurring charges already due before the next income. |
 | **safe** | cash − committed − the savings target not yet met − what you owe. |
 
+Savings is netted, not accumulated: redeeming part of it reopens the gap to the
+target. A figure that can only ever grow is not a target.
+
+Debts are netted **per person** and read from the whole history, by the same
+function the Ledger renders — so the two screens cannot disagree. Lending someone
+6,570 and borrowing 550 from them is one balance of 6,020, not two lines about
+the same person, and a friend who has paid you back drops off both.
+
 `safe ÷ days left` sits under the capture input, because that is the only place a
 number can change a decision. The period runs from your last income entry, not
 the calendar: a salary landing on the 3rd makes "this month" the wrong window and

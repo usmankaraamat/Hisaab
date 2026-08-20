@@ -55,6 +55,24 @@ export async function renderSpending(root) {
   }
 }
 
+/**
+ * Who the outstanding balances are with.
+ *
+ * The totals above are netted per person, so "owed back to you 4,620" can be one
+ * person or six. Naming them is what stops the figure reading as an abstraction
+ * — and it is one tap from here to the Ledger, where it gets settled.
+ */
+function peopleLine(b) {
+  const open = (b.people ?? []).filter((p) => p.netMinor !== 0);
+  if (!open.length) return '';
+  const names = open
+    .slice(0, 3)
+    .map((p) => escapeHtml(p.name))
+    .join(', ');
+  const more = open.length > 3 ? ` and ${open.length - 3} more` : '';
+  return `<p class="hint people-line">With ${names}${more}.</p>`;
+}
+
 function card(title, inner, hint = '') {
   return `<div class="card">
     <h3>${title}</h3>
@@ -104,20 +122,23 @@ function leftCard(b) {
              }`
      }</p>
      ${row('In the wallet', formatMinor(b.cashMinor))}
-     ${b.committedMinor ? row('Bills still due', `− ${formatMinor(b.committedMinor)}`, 'down') : ''}
+     ${b.committedMinor ? row('Bills still due', `− ${formatMinor(b.committedMinor)}`, 'up') : ''}
      ${
        b.savingsTargetMinor
          ? row(
-             b.savingsRemainingMinor ? 'Still to save' : `Saved (target ${formatMinor(b.savingsTargetMinor)})`,
+             b.savingsRemainingMinor
+               ? `Still to save${b.savedMinor < 0 ? ' (some redeemed)' : ''}`
+               : `Saved (target ${formatMinor(b.savingsTargetMinor)})`,
              b.savingsRemainingMinor
                ? `− ${formatMinor(b.savingsRemainingMinor)}`
                : `${formatMinor(b.savedMinor)} ✓`,
-             b.savingsRemainingMinor ? 'down' : 'up'
+             b.savingsRemainingMinor ? '' : 'down'
            )
          : ''
      }
-     ${b.owedByMeMinor ? row('You owe people', `− ${formatMinor(b.owedByMeMinor)}`, 'down') : ''}
-     ${b.lentOutMinor ? row('Owed back to you', formatMinor(b.lentOutMinor), 'up') : ''}`,
+     ${b.iOweMinor ? row('You owe people', `− ${formatMinor(b.iOweMinor)}`, 'up') : ''}
+     ${b.owedToMeMinor ? row('Owed back to you', formatMinor(b.owedToMeMinor), 'down') : ''}
+     ${peopleLine(b)}`,
     `${period}${until ? `, next expected ${until}` : ''}.`
   );
 }
@@ -150,7 +171,9 @@ function breakdownCard(rows, b) {
     .join('');
 
   const aside = [
-    b.savedMinor ? row('Saved or invested', formatMinor(b.savedMinor)) : '',
+    b.savedMinor > 0 ? row('Saved or invested', formatMinor(b.savedMinor)) : '',
+    // Net of redemptions, so this flips rather than showing a negative "saved".
+    b.savedMinor < 0 ? row('Taken back out of savings', formatMinor(-b.savedMinor), 'up') : '',
     b.transferMinor ? row('Transferred or lent', formatMinor(b.transferMinor)) : '',
     b.lentOutMinor ? row('Paid for other people', formatMinor(b.lentOutMinor)) : '',
     b.fundedByOthersMinor ? row('Paid for by other people', formatMinor(b.fundedByOthersMinor)) : '',

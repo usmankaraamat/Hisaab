@@ -10,7 +10,7 @@ import { allTransactions, settleCounterparty, settleTransaction } from '../db/lo
 import { balances, ledgerTotals } from '../lib/ledger.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
-import { txnLabel } from '../lib/label.js';
+import { ledgerLabel } from '../lib/label.js';
 import { syncNow } from '../db/sync.js';
 
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
@@ -21,6 +21,14 @@ const EFFECT = {
   borrowed: 'they paid',
   repaid_to: 'you paid them back',
 };
+
+/* Whose money it was, which is the thing a shared screenshot has to convey at a
+ * glance. Red is every row that moves the balance towards them — what they paid
+ * for you, and what they have already paid back — so the black column is what
+ * you are still owed and the red column is what has come off it. This tracks
+ * the ledger sign, not the direction: "chicken from sister" is an outgoing row
+ * that she funded, and it belongs with the reimbursements. */
+const THEIRS = new Set(['borrowed', 'repaid_by']);
 
 export async function renderLedger(root) {
   root.innerHTML = `
@@ -79,13 +87,15 @@ function card(person, body) {
     .map(
       (r) => `
       <li class="${r.ledger_settled ? 'settled' : ''}">
-        <span class="l-name">${escapeHtml(txnLabel(r))}</span>
+        <span class="l-name">${escapeHtml(ledgerLabel(r))}</span>
         <span class="l-meta">${DAY.format(new Date(r.occurred_at))} · ${EFFECT[r.ledger_effect] ?? r.ledger_effect}${
           r.ledger_settled ? ' · written off' : ''
         }</span>
-        <span class="l-amt ${r.direction}">${formatMinor(r.amount_minor)}</span>
+        <span class="l-amt ${THEIRS.has(r.ledger_effect) ? 'theirs' : 'mine'}">${
+          THEIRS.has(r.ledger_effect) ? '−' : ''
+        }${formatMinor(r.amount_minor)}</span>
         <button type="button" class="l-settle link" data-row="${r.id}" data-settled="${r.ledger_settled ? 1 : 0}"
-          aria-label="${r.ledger_settled ? 'Count' : 'Do not count'} ${escapeHtml(txnLabel(r))} in the balance">
+          aria-label="${r.ledger_settled ? 'Count' : 'Do not count'} ${escapeHtml(ledgerLabel(r))} in the balance">
           ${r.ledger_settled ? 'Count it' : 'Write off'}
         </button>
       </li>`

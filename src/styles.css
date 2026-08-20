@@ -744,3 +744,10 @@ label.stack input {
   border: 1px solid var(--line);
   border-radius: 10px;
 }
+
+/* Whose money it was. Red on everything they paid — for you, or back to you —
+ * so a screenshot of a person's panel reads without the meta line. The minus
+ * carries the same meaning for anyone who cannot separate the two colours. */
+.l-amt.theirs { color: var(--danger); }
+
+.spending .people-line { margin: 10px 0 0; font-size: .8rem; }

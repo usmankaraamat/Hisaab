@@ -24,7 +24,7 @@ import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
 import { budgetSummary, categoryTotals } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
-import { txnLabel, hasRewrite } from '../src/lib/label.js';
+import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import {
   rideSurge,
@@ -273,12 +273,13 @@ check('spending before the period is excluded', b.spendMinor, 100000);
 check('an investment is not spending', b.savedMinor, 5000000);
 check('money lent out is not spending', b.lentOutMinor, 44000);
 check('a purchase someone else paid for is not spending', b.fundedByOthersMinor, 50000);
-check('and it is a debt', b.owedByMeMinor, 50000);
+check('and it is a debt', b.iOweMinor, 50000);
 // 13,000,000 in, less 100,000 + 5,000,000 + 44,000 out. The 50,000 Harry paid
 // never touched the wallet, and the July row is outside the period.
 check('cash counts everything that actually moved', b.cashMinor, 7856000);
 check('what you owe is subtracted from what is safe to spend',
   b.safeToSpendMinor, 7856000 - 50000);
+check('and what is owed to you is not added to it', b.owedToMeMinor, 44000);
 // Aug 8 12:00 to Sep 3 13:00 is 26 days and an hour, and a part day still has
 // to be spent through, so it rounds up.
 check('the allowance divides by the days remaining', b.daysLeft, 27);
@@ -363,6 +364,83 @@ check('incoming money is never compared against an expense',
     { name: 'Salary', amountMinor: 12000, direction: 'out', at: '2026-08-05T10:40:00.000Z' }
   ), null);
 
+console.log('\n--- balances are netted per person, not summed gross ---');
+
+/* The bug this replaces, from the live data: one sister lent 6,570, borrowed 550
+ * from and repaid 1,400 by appeared as "owed back 6,570" AND "you owe 550" —
+ * two lines about one person — while a friend who had settled in full still
+ * showed his original loan, because repayments were never subtracted at all. */
+const sister = (effect, minor, extra = {}) => ({
+  raw_name: 'x', counterparty_name: 'Sister', ledger_effect: effect, amount_minor: minor,
+  direction: effect === 'lent' || effect === 'repaid_to' ? 'out' : 'in',
+  occurred_at: '2026-08-10T10:00:00.000Z', category: 'Groceries', deleted: 0, ...extra,
+});
+
+const mixed = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 13000000, category: 'Income',
+          occurred_at: '2026-08-03T13:00:00.000Z' }),
+  sister('lent', 657000),
+  // She bought something for me: an outgoing row she funded.
+  sister('borrowed', 55000, { direction: 'out' }),
+  sister('repaid_by', 140000),
+  // Squared up in full, so he must disappear from both totals.
+  { raw_name: 'cake for Jahangir', counterparty_name: 'Jahangir', ledger_effect: 'lent',
+    amount_minor: 44000, direction: 'out', occurred_at: '2026-08-04T10:00:00.000Z', deleted: 0 },
+  { raw_name: 'Reimbursement from Jahangir', counterparty_name: 'Jahangir', ledger_effect: 'repaid_by',
+    amount_minor: 44000, direction: 'in', occurred_at: '2026-08-04T11:00:00.000Z', deleted: 0 },
+];
+
+const net = budgetSummary(mixed, { now: asOfAug8 });
+check('one person nets to one figure', net.owedToMeMinor, 657000 - 55000 - 140000);
+check('and does not also appear on the other line', net.iOweMinor, 0);
+check('someone who has settled up is gone from the totals',
+  net.people.filter((x) => x.netMinor !== 0).map((x) => x.name), ['Sister']);
+check('the Spending totals match the Ledger totals exactly',
+  [net.owedToMeMinor, net.iOweMinor],
+  [ledgerTotals(balances(mixed)).owedToMeMinor, ledgerTotals(balances(mixed)).iOweMinor]);
+
+// Reversed: she is owed overall, so the debt is the one that must be subtracted.
+const iOwe = budgetSummary(
+  [mixed[0], sister('borrowed', 200000, { direction: 'out' }), sister('lent', 50000)],
+  { now: asOfAug8 }
+);
+check('a net debt subtracts from what is safe to spend',
+  [iOwe.iOweMinor, iOwe.owedToMeMinor], [150000, 0]);
+check('a debt from before this period still counts',
+  budgetSummary([mixed[0], sister('borrowed', 90000, { direction: 'out',
+    occurred_at: '2026-07-02T10:00:00.000Z' })], { now: asOfAug8 }).iOweMinor, 90000);
+check('a written-off row leaves the totals alone',
+  budgetSummary([mixed[0], sister('lent', 90000, { ledger_settled: 1 })],
+    { now: asOfAug8 }).owedToMeMinor, 0);
+
+console.log('\n--- money moved in and out of savings ---');
+
+/* Savings is the one category where money comes back. Counting only the
+ * deposits reported 50,000 saved after 10,000 had been taken out again, which
+ * makes a savings target impossible to trust — the number only ever grew. */
+const pot = (dir, minor, at) => spend({
+  raw_name: dir === 'in' ? 'Cashed Savings' : 'Investment',
+  direction: dir, amount_minor: minor, category: 'Savings', occurred_at: at,
+});
+
+const potRows = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 13000000, category: 'Income',
+          occurred_at: '2026-08-03T13:00:00.000Z' }),
+  pot('out', 5000000, '2026-08-03T14:00:00.000Z'),
+  pot('in', 1000000, '2026-08-06T10:00:00.000Z'),
+];
+const potSummary = budgetSummary(potRows, { savingsTargetMinor: 5000000, now: asOfAug8 });
+check('a withdrawal reduces what has been saved', potSummary.savedMinor, 4000000);
+check('and reopens the gap to the target', potSummary.savingsRemainingMinor, 1000000);
+check('taking your own money back is not income', potSummary.incomeMinor, 13000000);
+check('but it is still cash in hand', potSummary.cashMinor, 13000000 - 5000000 + 1000000);
+check('withdrawing more than was put in this period goes negative',
+  budgetSummary([potRows[0], pot('in', 1000000, '2026-08-06T10:00:00.000Z')],
+    { now: asOfAug8 }).savedMinor, -1000000);
+check('a savings withdrawal is not spending',
+  categoryTotals(potRows).some((c) => c.category === 'Savings'), false);
+
+
 console.log('\n--- display names ---');
 check('a tidy name replaces the raw text',
   txnLabel({ raw_name: 'home office indrive', display_name: 'Indrive Home → Office' }),
@@ -374,6 +452,21 @@ check('anything else falls back to what was typed',
 check('the original is offered only when it differs',
   [hasRewrite({ raw_name: 'Eggs + Bread' }), hasRewrite({ raw_name: 'Indrive gym-home' })],
   [false, true]);
+
+// Under a person's own heading, repeating their name on every line is what
+// makes the panel unshareable.
+const under = (raw, party) => ledgerLabel({ raw_name: raw, counterparty_name: party });
+check('"for <person>" is dropped', under('Milk for Sister', 'Sister'), 'Milk');
+check('so is "from"', under('chicken from sister', 'Sister'), 'chicken');
+check('so is "to"', under('Loan to Sister', 'Sister'), 'Loan');
+check('and the bracketed form', under('Internet Bundle(Uzair)', 'Uzair'), 'Internet Bundle');
+check('a short form still matches', under('Slanty(for sis)', 'Sister'), 'Slanty');
+check('a reimbursement reads as itself', under('Reimbursement from sister', 'Sister'), 'Reimbursement');
+check('someone else in the clause is left alone', under('Gift for Eid', 'Sister'), 'Gift for Eid');
+check('a name that is only part of the item survives',
+  under('Anser Farewell + Oil Spray Bottle', 'Anser'), 'Anser Farewell + Oil Spray Bottle');
+check('an entry with nothing left over keeps its text', under('for sister', 'Sister'), 'for sister');
+check('a row with no counterparty is untouched', under('Milk for Sister', null), 'Milk for Sister');
 
 console.log('\n--- route normalisation ---');
 check('hyphen, no spaces', parseRoute('Indrive Flat-Office'), {

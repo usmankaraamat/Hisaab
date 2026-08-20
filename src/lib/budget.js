@@ -8,7 +8,9 @@
  *
  *   cash        everything that left or entered the wallet. The honest total.
  *   spend       consumption only — savings, transfers and money lent out and
- *               still owed are all excluded.
+ *               still owed are all excluded. Savings is netted, so redeeming
+ *               some of it reopens the gap to the target rather than being
+ *               quietly ignored.
  *   committed   recurring charges already known to be due before the next
  *               income. Spoken for, even though it has not left yet.
  *   safe        cash − committed − the savings target not yet met.
@@ -25,6 +27,7 @@
  */
 
 import { subscriptions } from './insights.js';
+import { balances, ledgerTotals } from './ledger.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -115,12 +118,22 @@ export function budgetSummary(
   let savedMinor = 0;
   let transferMinor = 0;
   let lentOutMinor = 0;
-  let owedByMeMinor = 0;
   let fundedByOthersMinor = 0;
 
   for (const r of inPeriod) {
     if (r.direction === 'in') {
       inMinor += r.amount_minor;
+
+      /* Savings is the one category where money comes back out. Counting only
+       * the deposits reported 50,000 saved after 10,000 had been redeemed —
+       * a figure that can only ever grow, which makes a target meaningless.
+       * It is not income either: taking your own money back does not make the
+       * month richer, it undoes a decision made earlier in it. */
+      if (r.category === 'Savings') {
+        savedMinor -= r.amount_minor;
+        continue;
+      }
+
       // A repayment is money returning, not money earned. Counting it as income
       // would make a month look richer every time a friend settled up.
       if (!r.ledger_effect) incomeMinor += r.amount_minor;
@@ -132,7 +145,6 @@ export function budgetSummary(
     // repayment is logged it is an ordinary outgoing, and that is what costs.
     if (r.ledger_effect === 'borrowed') {
       fundedByOthersMinor += r.amount_minor;
-      if (!r.ledger_settled) owedByMeMinor += r.amount_minor;
       continue;
     }
 
@@ -160,12 +172,28 @@ export function budgetSummary(
     });
   const committedMinor = committed.reduce((a, s) => a + s.lastMinor, 0);
 
+  /* Debts, netted per person and read from the whole history.
+   *
+   * Two bugs lived in the period-scoped sums this replaces. They ignored
+   * repayments entirely, so a friend who had paid you back in full still
+   * appeared under "owed back to you" at the full amount. And they reported
+   * each direction gross, so a sister you had lent 6,570, borrowed 550 from and
+   * been repaid 1,400 by appeared on *both* lines at once instead of on one at
+   * 4,620 — which is not two facts about your money, it is one fact stated
+   * confusingly.
+   *
+   * `balances` is the same function the Ledger tab renders, so the two screens
+   * can no longer disagree. All-time rather than in-period on purpose: a debt
+   * does not lapse because a salary landed. */
+  const book = balances(all);
+  const owed = ledgerTotals(book);
+
   const savingsRemainingMinor = Math.max(0, savingsTargetMinor - savedMinor);
   // Money owed to other people is as spoken for as a bill that has not arrived
   // yet. Money owed *to* you is not added back — it may never come, and a
   // spending limit should never be inflated by an optimistic assumption.
   const safeToSpendMinor =
-    cashMinor - committedMinor - savingsRemainingMinor - owedByMeMinor;
+    cashMinor - committedMinor - savingsRemainingMinor - owed.iOweMinor;
 
   return {
     since: sinceMs === -Infinity ? null : new Date(sinceMs).toISOString(),
@@ -182,9 +210,14 @@ export function budgetSummary(
     spendMinor,
     savedMinor,
     transferMinor,
+    // Gross outflow on other people's behalf this period — an answer to "where
+    // did the money go", which is a different question from what is still owed.
     lentOutMinor,
-    owedByMeMinor,
     fundedByOthersMinor,
+    // Net per person, all time. What is actually outstanding.
+    owedToMeMinor: owed.owedToMeMinor,
+    iOweMinor: owed.iOweMinor,
+    people: book,
 
     committed,
     committedMinor,
