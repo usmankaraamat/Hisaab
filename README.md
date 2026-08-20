@@ -106,10 +106,9 @@ computed:
 Savings is netted, not accumulated: redeeming part of it reopens the gap to the
 target. A figure that can only ever grow is not a target.
 
-Debts are netted **per person** and read from the whole history, by the same
-function the Ledger renders — so the two screens cannot disagree. Lending someone
-6,570 and borrowing 550 from them is one balance of 6,020, not two lines about
-the same person, and a friend who has paid you back drops off both.
+What you owe reduces `safe`; what is owed *to* you does not increase it. It may
+never come, and a spending limit should not be inflated by an optimistic
+assumption. Both figures are the Ledger's own — see below.
 
 `safe ÷ days left` sits under the capture input, because that is the only place a
 number can change a decision. The period runs from your last income entry, not
