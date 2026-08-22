@@ -24,7 +24,14 @@ const SIGN = { lent: 1, repaid_to: 1, repaid_by: -1, borrowed: -1 };
 /** Does this row move a balance? */
 export function isLedgerRow(row) {
   return Boolean(
-    !row.deleted && row.ledger_effect && SIGN[row.ledger_effect] && counterpartyOf(row)
+    !row.deleted &&
+      // Imported history is reference only. It predates this app's shared-expense
+      // handling entirely, so its counterparties would open balances that were
+      // settled in cash years ago.
+      row.source !== 'bluecoins' &&
+      row.ledger_effect &&
+      SIGN[row.ledger_effect] &&
+      counterpartyOf(row)
   );
 }
 

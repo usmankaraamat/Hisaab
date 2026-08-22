@@ -36,7 +36,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * what it looks like it means. See CATEGORIES in the enrichment prompt. */
 export const NON_SPEND = new Set(['Savings', 'Transfers & Loans']);
 
-const live = (rows) => rows.filter((r) => !r.deleted);
+/* Deleted rows are gone; imported rows are reference only.
+ *
+ * The Bluecoins export covers a period lived with flatmates covering each
+ * other's expenses, with real gaps in the logging. Those totals cannot be
+ * compared with anything tracked here, so nothing on the Spending screen, the
+ * Ledger or the allowance may touch them. Overview shows them, greyed, because
+ * seeing them is the one thing they are good for. */
+const REFERENCE = new Set(['bluecoins']);
+const live = (rows) => rows.filter((r) => !r.deleted && !REFERENCE.has(r.source));
 
 /** Money out you expect back: lent, not yet written off, not yet repaid. */
 export function isOutstandingLoan(row) {

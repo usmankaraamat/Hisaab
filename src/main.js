@@ -5,6 +5,7 @@ import { renderSettings } from './views/settings.js';
 import { renderReview } from './views/review.js';
 import { renderLedger } from './views/ledger.js';
 import { renderSpending } from './views/spending.js';
+import { renderOverview } from './views/overview.js';
 import { startAutoSync } from './db/sync.js';
 import { setMeta } from './db/local.js';
 import { invalidate } from './capture/predict.js';
@@ -14,6 +15,7 @@ const views = {
   add: renderAdd,
   history: renderHistory,
   spending: renderSpending,
+  overview: renderOverview,
   ledger: renderLedger,
   // "insights" was the old tab name; a bookmark or an installed shortcut can
   // still be pointing at it.

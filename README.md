@@ -152,6 +152,58 @@ bar counted, so a real category means *your* groceries. What you bought for
 other people is reachable under **On other people**, under **Owed back to you**,
 or by person.
 
+## Overview
+
+Spending and saving over time, drilled month → week → day. The chart is inline
+SVG — two series of at most twelve bars, under a hundred lines — because a
+charting dependency would outweigh the entire app.
+
+Weeks are blocks of seven from the 1st, not ISO weeks. An ISO week straddles the
+month boundary, which would put the same day in two months and stop the weeks
+adding up to the month above them. The list under the chart carries the exact
+numbers and is what you tap to drill, so the bars never have to be a hit target.
+
+Series colours are validated for contrast and colour-vision deficiency against
+both surfaces, and identity never rests on colour alone: there is a legend, the
+list names every bar, and imported bars are hatched as well as faded.
+
+**Calendar, not payday.** Everywhere else a period runs from one income to the
+next, because that is what a spending limit is measured against. Overview is
+history, so August has to mean August. The two disagree by a few days on purpose.
+
+## What is imported, and what is measured
+
+The Bluecoins export is kept as reference and quarantined from everything that
+claims to mean something. That period was lived with flatmates covering each
+other's expenses and the logging has real gaps, so its totals are not comparable
+with anything tracked here.
+
+`source` is the line. Imported rows are excluded from the Spending screen, the
+Ledger, the allowance, the savings pot and every month-over-month comparison.
+Overview draws them, faded and hatched and labelled — seeing them is the one
+thing they are good for.
+
+A month holding both kinds describes itself with the tracked ones. The export
+overlaps the first days of the month the app started; greying out the only month
+actually measured because three imported rows landed in it would be the wrong
+trade.
+
+## Savings
+
+`savingsPot` is a running balance: every amount logged as savings, less every
+withdrawal, for all time. It is driven only by what was logged — never inferred
+from income minus spending, which would move on its own whenever anything else
+changed — and it never resets. A salary landing should not wipe out months of
+visible progress.
+
+The per-period target is a separate thing and stays per-period, because a monthly
+target has to be measured against a month; the card labels it as such. The
+**goal** — a name, an amount, a date — is measured against the pot, and reports
+when you arrive at your current rate.
+
+`suggestedTarget` proposes a figure from your *worst* complete month rather than
+your average. A target you hit half the time stops being a target.
+
 ## Entering the same thing twice
 
 `Cake 2200` was entered, and thirty-five minutes later the same cake was entered

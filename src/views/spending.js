@@ -20,6 +20,7 @@
 
 import { allTransactions, getMeta } from '../db/local.js';
 import { budgetSummary, categoryTotals, ON_OTHERS } from '../lib/budget.js';
+import { savingsPot } from '../lib/trends.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
@@ -44,6 +45,8 @@ export async function renderSpending(root) {
 
   const now = new Date();
   const budget = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, now });
+  // The pot is a running balance, not a per-period figure. See lib/trends.js.
+  budget.potMinor = savingsPot(rows).minor;
 
   host.innerHTML = [
     leftCard(budget),
@@ -133,8 +136,8 @@ function leftCard(b) {
        b.savingsTargetMinor
          ? row(
              b.savingsRemainingMinor
-               ? `Still to save${b.savedMinor < 0 ? ' (some redeemed)' : ''}`
-               : `Saved (target ${formatMinor(b.savingsTargetMinor)})`,
+               ? `Still to set aside this period${b.savedMinor < 0 ? ' (some redeemed)' : ''}`
+               : `Set aside this period (target ${formatMinor(b.savingsTargetMinor)})`,
              b.savingsRemainingMinor
                ? `− ${formatMinor(b.savingsRemainingMinor)}`
                : `${formatMinor(b.savedMinor)} ✓`,
@@ -142,6 +145,7 @@ function leftCard(b) {
            )
          : ''
      }
+     ${b.potMinor ? row('Saved in total', formatMinor(b.potMinor), 'down') : ''}
      ${
        b.iOweMinor
          ? row('Owed to other people', `− ${formatMinor(b.iOweMinor)}`, 'up')

@@ -372,8 +372,8 @@ input[type='email']:focus { outline: none; border-color: var(--accent); }
 
 .p-actions button:disabled { opacity: .4; }
 
-/* Six tabs now, so they need to be tighter still. */
-#tabs button { font-size: .72rem; padding: 0 1px; }
+/* Seven tabs now, so they need to be tighter still. */
+#tabs button { font-size: .66rem; padding: 0 1px; letter-spacing: -.01em; }
 
 .surge {
   margin: -6px 0 12px;
@@ -751,3 +751,127 @@ label.stack input {
 .l-amt.theirs { color: var(--danger); }
 
 .spending .people-line { margin: 10px 0 0; font-size: .8rem; }
+
+/* ---------- overview ----------
+ *
+ * Series colours are validated for contrast and colour-vision deficiency
+ * against both surfaces. Do not substitute by eye — re-run the validator.
+ *   light  spend #2a78d6 · save #16a34a   (surface #f4f5f7)
+ *   dark   spend #3987e5 · save #199e70   (surface #181b21)
+ * Identity never rests on colour alone: there is a legend, the list below the
+ * chart names every bar, and reference bars carry a hatch as well as a fade. */
+
+.overview {
+  --ov-spend: #2a78d6;
+  --ov-save: #16a34a;
+}
+
+@media (prefers-color-scheme: dark) {
+  .overview { --ov-spend: #3987e5; --ov-save: #199e70; }
+}
+
+.ov-chart { display: block; width: 100%; height: auto; margin: 4px 0 2px; overflow: visible; }
+.ov-grid { stroke: var(--line); stroke-width: 1; }
+.ov-tick, .ov-xlabel { fill: var(--muted); font-size: 8px; font-family: inherit; }
+.ov-bar.spend { fill: var(--ov-spend); }
+.ov-bar.save { fill: var(--ov-save); }
+.ov-ghost { fill: var(--ov-spend); opacity: .28; }
+
+/* Imported history: faded and hatched, so it cannot be mistaken for a month
+ * this app actually measured. */
+.ov-band.ref .ov-bar { opacity: .4; }
+#ov-hatch line { stroke: var(--muted); stroke-width: 1; }
+
+.ov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 2px 0 12px;
+  color: var(--muted);
+  font-size: .74rem;
+}
+
+.ov-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.ov-legend .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.ov-legend .sw.spend { background: var(--ov-spend); }
+.ov-legend .sw.save { background: var(--ov-save); }
+.ov-legend .sw.ghost { background: var(--ov-spend); opacity: .28; }
+.ov-legend .sw.ref { background: var(--muted); opacity: .4; }
+
+.ov-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: .8rem;
+}
+
+.ov-sep { color: var(--line); }
+
+.ov-rows { display: grid; }
+
+.ov-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 0;
+  font: inherit;
+  font-size: .88rem;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.ov-row:last-child { border-bottom: 0; }
+.ov-row.flat { cursor: default; }
+.ov-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ov-ref {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: .68rem;
+  font-style: normal;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.ov-row-nums { display: flex; gap: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ov-row-nums .num { font-weight: 600; }
+/* The dot beside the figure carries identity; the text stays ink. */
+.ov-row-nums .num::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.ov-row-nums .num.spend::before { background: var(--ov-spend); }
+.ov-row-nums .num.save::before { background: var(--ov-save); }
+
+.overview .big { margin-top: 4px; font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.overview .big-sub { margin: 2px 0 12px; color: var(--muted); font-size: .85rem; }
+.overview .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+.overview .row:last-child { border-bottom: 0; }
+.overview .row small { display: block; margin-top: 2px; color: var(--muted); font-size: .76rem; }
+.overview .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.overview .num small { font-weight: 400; }
+.overview .num.up { color: var(--danger); }
+.overview .num.down { color: var(--accent); }
+.overview .aside { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
+
+.ov-goal { margin-top: 14px; }
+.ov-goal-head { display: flex; justify-content: space-between; gap: 12px; font-size: .88rem; margin-bottom: 6px; }
+.ov-goal .cat-bar { display: block; }
+.ov-goal .hint { margin: 8px 0 0; }
+
+.ov-legend .ov-note { display: block; width: 100%; margin-top: 2px; font-size: .72rem; }

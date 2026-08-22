@@ -24,6 +24,11 @@ import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
 import { budgetSummary, categoryTotals, ON_OTHERS } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
+import { barLayout, gridLines, ceilNice, shortMinor, FRAME } from '../src/lib/chart.js';
+import {
+  monthlySeries, weeklySeries, dailySeries, weeksIn, savingsPot, savingsRate,
+  projectMonth, categoryDelta, suggestedTarget, goalProgress, isTracked,
+} from '../src/lib/trends.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import {
@@ -446,6 +451,173 @@ check('withdrawing more than was put in this period goes negative',
 check('a savings withdrawal is not spending',
   categoryTotals(potRows).some((c) => c.category === 'Savings'), false);
 
+
+console.log('\n--- time series, and what may be compared with what ---');
+
+const on = (iso, over = {}) => spend({ occurred_at: iso, ...over });
+
+const history = [
+  // Imported: kept for reference, never mixed into a figure that means something.
+  on('2026-07-10T10:00:00.000Z', { amount_minor: 900000, category: 'Groceries', source: 'bluecoins' }),
+  on('2026-08-03T13:00:00.000Z', { raw_name: 'Salary', direction: 'in',
+      amount_minor: 13000000, category: 'Income' }),
+  on('2026-08-03T14:00:00.000Z', { raw_name: 'Investment', amount_minor: 5000000, category: 'Savings' }),
+  on('2026-08-05T10:00:00.000Z', { amount_minor: 100000, category: 'Groceries' }),
+  on('2026-08-09T10:00:00.000Z', { amount_minor: 870000, category: 'Utilities' }),
+  on('2026-08-12T10:00:00.000Z', { amount_minor: 200000, category: 'Rides' }),
+  on('2026-08-20T10:00:00.000Z', { raw_name: 'Redeemed', direction: 'in',
+      amount_minor: 1000000, category: 'Savings' }),
+];
+
+const series = monthlySeries(history);
+check('one bucket per calendar month', series.map((m) => m.key), ['2026-07', '2026-08']);
+check('an imported month is flagged, not hidden',
+  series.map((m) => m.reference), [true, false]);
+check('spend is money consumed', series[1].spendMinor, 100000 + 870000 + 200000);
+check('savings nets deposits against redemptions', series[1].savedMinor, 5000000 - 1000000);
+check('fixed and flexible split the spend',
+  [series[1].fixedMinor, series[1].flexibleMinor], [870000, 300000]);
+check('and add back to it',
+  series[1].fixedMinor + series[1].flexibleMinor, series[1].spendMinor);
+check('a savings redemption is not income', series[1].incomeMinor, 13000000);
+
+// The export overlaps the first days of the month the app started. A month with
+// any tracked rows must describe itself with those, not be greyed out wholesale.
+const mixedMonth = [
+  on('2026-07-10T10:00:00.000Z', { amount_minor: 900000, category: 'Groceries', source: 'bluecoins' }),
+  on('2026-08-02T10:00:00.000Z', { amount_minor: 700000, category: 'Groceries', source: 'bluecoins' }),
+  on('2026-08-15T10:00:00.000Z', { amount_minor: 100000, category: 'Groceries' }),
+];
+const mixedSeries = monthlySeries(mixedMonth);
+check('a wholly imported month is reference', mixedSeries[0].reference, true);
+check('a month with tracked rows is not', mixedSeries[1].reference, false);
+check('and reports only what was tracked', mixedSeries[1].spendMinor, 100000);
+check('but says it also holds imported rows', mixedSeries[1].mixed, true);
+check('a purely tracked month is neither',
+  [mixedSeries[1].mixed, monthlySeries([on('2026-09-01T10:00:00.000Z', { amount_minor: 100 })])[0].mixed],
+  [true, false]);
+
+
+check('savings rate is saved over income', Math.round(savingsRate(series[1]) * 100), 31);
+check('no income means no rate, not a zero one', savingsRate(series[0]), null);
+
+/* Weeks are blocks of seven from the 1st, not ISO weeks. An ISO week straddles
+ * the month boundary, which would put the same day in two months and stop the
+ * weeks adding up to the month above them. */
+check('August splits into five blocks', weeksIn(2026, 7).map((w) => [w.start, w.end]),
+  [[1, 7], [8, 14], [15, 21], [22, 28], [29, 31]]);
+check('February 2026 ends on the 28th', weeksIn(2026, 1).at(-1).end, 28);
+
+const weeks = weeklySeries(history, 2026, 7);
+check('the weeks add back up to the month',
+  weeks.reduce((a, w) => a + w.spendMinor, 0), series[1].spendMinor);
+check('each row lands in exactly one week',
+  weeks.map((w) => w.spendMinor), [100000, 870000 + 200000, 0, 0, 0]);
+
+const days = dailySeries(history, 2026, 7, 8, 14);
+check('the days add back up to the week',
+  days.reduce((a, d) => a + d.spendMinor, 0), weeks[1].spendMinor);
+check('a day with nothing in it is still a bar', days.length, 7);
+
+console.log('\n--- the savings pot does not reset ---');
+
+/* The complaint this fixes: a salary landing dropped "saved" back to zero,
+ * wiping out months of visible progress. The pot is a running balance driven
+ * only by what was logged as savings. */
+const potNow = savingsPot(history);
+check('every deposit less every withdrawal', potNow.minor, 5000000 - 1000000);
+check('counted, both ways', [potNow.deposits, potNow.withdrawals], [1, 1]);
+check('income does not touch it',
+  savingsPot([...history, on('2026-09-03T10:00:00.000Z', { direction: 'in',
+    amount_minor: 13000000, category: 'Income' })]).minor, potNow.minor);
+check('nor does spending',
+  savingsPot([...history, on('2026-09-04T10:00:00.000Z', { amount_minor: 500000,
+    category: 'Rides' })]).minor, potNow.minor);
+check('imported savings are reference only, so they stay out of the pot',
+  savingsPot([on('2026-07-02T10:00:00.000Z', { amount_minor: 999999,
+    category: 'Savings', source: 'bluecoins' })]).minor, 0);
+check('provenance is what decides',
+  [isTracked({ source: 'manual' }), isTracked({ source: 'bluecoins' })], [true, false]);
+
+const goal = goalProgress(
+  { name: 'Laptop', targetMinor: 20000000, byIso: '2027-02-01T00:00:00.000Z' },
+  series, { now: new Date('2026-08-22T12:00:00.000Z'), potMinor: potNow.minor }
+);
+check('the goal measures against the pot', goal.savedMinor, 4000000);
+check('and reports what is left', goal.remainingMinor, 16000000);
+check('as a percentage', goal.pct, 20);
+
+console.log('\n--- projection and month-over-month ---');
+
+const august = series[1];
+const projected = projectMonth(august, new Date('2026-08-22T12:00:00.000Z'));
+// 1,170,000 over 22 days, run out to 31.
+check('the month is projected from the pace so far',
+  projected.spendMinor, Math.round((1170000 / 22) * 31));
+check('a finished month is not projected',
+  projectMonth(series[0], new Date('2026-08-22T12:00:00.000Z')), null);
+
+const july = { year: 2026, month: 6 };
+const withPrior = [
+  ...history,
+  on('2026-07-11T10:00:00.000Z', { amount_minor: 50000, category: 'Rides' }),
+  on('2026-07-12T10:00:00.000Z', { amount_minor: 400000, category: 'Utilities' }),
+];
+const moved = categoryDelta(withPrior, august, july);
+check('the biggest mover leads, by amount not percentage', moved[0].category, 'Utilities');
+check('with both sides shown',
+  [moved[0].wasMinor, moved[0].nowMinor, moved[0].changeMinor], [400000, 870000, 470000]);
+check('a category that did not move is not listed',
+  moved.some((d) => d.changeMinor === 0), false);
+check('a category with no prior month has no percentage',
+  categoryDelta(withPrior, august, null)[0].changePct, null);
+// The imported July row is 900,000 of Groceries. Letting it into the comparison
+// would report an 800,000 collapse that never happened.
+check('imported history never feeds a comparison',
+  categoryDelta(withPrior, august, july).some((d) => d.category === 'Groceries' && d.wasMinor > 0),
+  false);
+
+check('a target needs two complete months before it will guess',
+  suggestedTarget(series, { now: new Date('2026-08-22T12:00:00.000Z') }), null);
+
+console.log('\n--- chart geometry stays inside the frame ---');
+
+/* The failure mode of a hand-rolled chart is geometric, not arithmetic: a bar
+ * escaping the plot, a negative height, an axis that stops below the tallest
+ * value. Checked here across the shapes the drill-down actually produces. */
+const bucketsOf = (...pairs) =>
+  pairs.map(([s, v], i) => ({ key: `k${i}`, label: `k${i}`, spendMinor: s, savedMinor: v }));
+
+for (const [name, set] of [
+  ['one bar', bucketsOf([100000, 0])],
+  ['twelve months', bucketsOf(...Array.from({ length: 12 }, (_, i) => [100000 * (i + 1), 50000]))],
+  ['a week of days', bucketsOf(...Array.from({ length: 7 }, () => [30000, 0]))],
+  ['all zero', bucketsOf([0, 0], [0, 0])],
+  ['saving beats spending', bucketsOf([10000, 5000000])],
+]) {
+  const { max, base, bars } = barLayout(set);
+  const tallest = Math.max(...set.map((b) => Math.max(b.spendMinor, b.savedMinor)));
+  const inside = bars.every(
+    (m) =>
+      m.spendX >= FRAME.left - 1 &&
+      m.saveX + m.w <= FRAME.w - FRAME.right + 1 &&
+      m.spendY >= FRAME.top - 0.01 &&
+      m.saveY >= FRAME.top - 0.01 &&
+      m.spendH >= 0 &&
+      m.saveH >= 0 &&
+      m.spendY + m.spendH <= base + 0.01
+  );
+  check(`${name}: every mark inside the frame`, inside, true);
+  check(`${name}: the axis reaches the tallest bar`, max >= tallest, true);
+  check(`${name}: bars never wider than the cap`, bars.every((m) => m.w <= 14), true);
+  check(`${name}: the pair never overlaps`, bars.every((m) => m.spendX + m.w <= m.saveX), true);
+}
+
+check('a nice ceiling rounds up, not down', [ceilNice(1), ceilNice(1170000), ceilNice(0)],
+  [1, 2000000, 100]);
+check('axis labels stay short', [shortMinor(1200000), shortMinor(45000), shortMinor(150000000)],
+  ['12k', '450', '1500k']);
+check('the baseline is the zero line', gridLines(100000)[0].y, barLayout(bucketsOf([1, 1])).base);
 
 console.log('\n--- display names ---');
 check('a tidy name replaces the raw text',

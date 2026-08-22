@@ -8,6 +8,7 @@ import {
   setMeta,
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
+import { budgetSummary } from '../lib/budget.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
@@ -40,6 +41,41 @@ export async function renderSettings(root) {
         <p id="budget-msg" class="hint"></p>
         <button type="button" id="save-budget">Save</button>
         <button type="button" id="clear-opening">Clear opening balance</button>
+      </div>
+
+      <div class="card">
+        <h3>Savings goal</h3>
+        <p class="hint">
+          Measured against your savings pot — every amount you logged as savings, less
+          what you took back out. It never resets when you are paid.
+        </p>
+        <label class="stack">What for
+          <input type="text" id="goal-name" placeholder="e.g. Laptop" spellcheck="false" />
+        </label>
+        <label class="stack">Amount
+          <input type="text" id="goal-amount" inputmode="decimal" placeholder="e.g. 180000" />
+        </label>
+        <label class="stack">By when <small>(optional)</small>
+          <input type="date" id="goal-by" />
+        </label>
+        <p id="goal-msg" class="hint"></p>
+        <button type="button" id="save-goal">Save goal</button>
+        <button type="button" id="clear-goal">Clear</button>
+      </div>
+
+      <div class="card">
+        <h3>Count your cash</h3>
+        <p class="hint">
+          Tracked balances drift — a missed entry, a rounding, a note handed over and
+          forgotten. Count what you actually hold and the difference is recorded as an
+          adjustment, so the balance stays worth reading.
+        </p>
+        <p id="recon-now" class="hint"></p>
+        <label class="stack">What you actually have
+          <input type="text" id="recon-amount" inputmode="decimal" placeholder="count it" />
+        </label>
+        <p id="recon-msg" class="hint"></p>
+        <button type="button" id="do-recon">Reconcile</button>
       </div>
 
       <div class="card">
@@ -123,6 +159,99 @@ export async function renderSettings(root) {
     await refreshBudget();
     budgetMsg.className = 'ok';
     budgetMsg.textContent = 'Saved.';
+  });
+
+  /* Savings goal.
+   *
+   * Stored as minor units plus an optional date. Measured against the pot — the
+   * running total of logged savings — not against a per-period figure, because
+   * a goal that resets every payday is not a goal. */
+  const goalName = root.querySelector('#goal-name');
+  const goalAmount = root.querySelector('#goal-amount');
+  const goalBy = root.querySelector('#goal-by');
+  const goalMsg = root.querySelector('#goal-msg');
+
+  async function refreshGoal() {
+    const goal = await getMeta('savings.goal', null);
+    goalName.value = goal?.name ?? '';
+    goalAmount.value = goal?.targetMinor ? String(goal.targetMinor / 100) : '';
+    goalBy.value = goal?.byIso ? goal.byIso.slice(0, 10) : '';
+  }
+
+  root.querySelector('#save-goal').addEventListener('click', async () => {
+    const targetMinor = toMinor(goalAmount.value);
+    if (targetMinor === null || targetMinor <= 0) {
+      goalMsg.className = 'warn';
+      goalMsg.textContent = 'Enter the amount you are saving towards.';
+      return;
+    }
+    await setMeta('savings.goal', {
+      name: goalName.value.trim() || 'Savings goal',
+      targetMinor,
+      byIso: goalBy.value ? new Date(`${goalBy.value}T12:00:00`).toISOString() : null,
+    });
+    await refreshGoal();
+    goalMsg.className = 'ok';
+    goalMsg.textContent = 'Saved. It shows on Overview.';
+  });
+
+  root.querySelector('#clear-goal').addEventListener('click', async () => {
+    await setMeta('savings.goal', null);
+    await refreshGoal();
+    goalMsg.className = 'hint';
+    goalMsg.textContent = 'Cleared.';
+  });
+
+  /* Reconciliation.
+   *
+   * Re-stamping the opening balance is all it takes: everything after that
+   * instant is counted forward from the number you just verified. The drift is
+   * logged so a pattern of always being short is visible rather than absorbed. */
+  const reconAmount = root.querySelector('#recon-amount');
+  const reconNow = root.querySelector('#recon-now');
+  const reconMsg = root.querySelector('#recon-msg');
+
+  async function refreshRecon() {
+    const [rows, opening, target] = await Promise.all([
+      allTransactions(),
+      getMeta('budget.opening', null),
+      getMeta('budget.savingsTarget', 0),
+    ]);
+    const b = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0 });
+    const last = await getMeta('budget.lastReconciled', null);
+    reconNow.textContent =
+      `The app thinks you have ${formatMinor(b.cashMinor)}.` +
+      (last
+        ? ` Last counted ${new Date(last.at).toLocaleDateString()}, ${
+            last.driftMinor === 0
+              ? 'exactly right'
+              : `${formatMinor(Math.abs(last.driftMinor))} ${last.driftMinor > 0 ? 'more' : 'less'} than tracked`
+          }.`
+        : '');
+    return b;
+  }
+
+  root.querySelector('#do-recon').addEventListener('click', async () => {
+    const actualMinor = toMinor(reconAmount.value);
+    if (actualMinor === null || actualMinor < 0) {
+      reconMsg.className = 'warn';
+      reconMsg.textContent = 'Enter what you counted.';
+      return;
+    }
+    const before = await refreshRecon();
+    const driftMinor = actualMinor - before.cashMinor;
+    const at = new Date().toISOString();
+    await setMeta('budget.opening', { amountMinor: actualMinor, at });
+    await setMeta('budget.lastReconciled', { at, driftMinor, actualMinor });
+    reconAmount.value = '';
+    await Promise.all([refreshBudget(), refreshRecon()]);
+    reconMsg.className = 'ok';
+    reconMsg.textContent =
+      driftMinor === 0
+        ? 'Exactly right. Nothing to adjust.'
+        : `Adjusted by ${formatMinor(Math.abs(driftMinor))} — you had ${
+            driftMinor > 0 ? 'more' : 'less'
+          } than tracked. Counting forward from now.`;
   });
 
   root.querySelector('#clear-opening').addEventListener('click', async () => {
@@ -277,7 +406,7 @@ export async function renderSettings(root) {
     await refreshStats();
   });
 
-  await Promise.all([refreshStats(), refreshAccount(), refreshBudget()]);
+  await Promise.all([refreshStats(), refreshAccount(), refreshBudget(), refreshGoal(), refreshRecon()]);
 }
 
 function pad(n, w = 2) {
