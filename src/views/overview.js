@@ -128,16 +128,20 @@ function chartCard(buckets, level, crumbs, month, now) {
       const m = marks[i];
       const ghost =
         projection && i === buckets.length - 1 && projection.spendMinor > b.spendMinor
-          ? `<rect class="ov-ghost" x="${m.spendX}" y="${y(projection.spendMinor)}"
-               width="${m.w}" height="${Math.max(0, m.spendY - y(projection.spendMinor))}" rx="2" />`
+          ? `<rect class="ov-ghost" x="${m.x}" y="${y(projection.spendMinor)}"
+               width="${m.w}" height="${Math.max(0, m.y - y(projection.spendMinor))}" rx="3" />`
           : '';
       return `
         <g class="ov-band${b.reference ? ' ref' : ''}" data-i="${i}">
           ${ghost}
-          <rect class="ov-bar spend" x="${m.spendX}" y="${m.spendY}"
-                width="${m.w}" height="${m.spendH}" rx="2" />
-          <rect class="ov-bar save" x="${m.saveX}" y="${m.saveY}"
-                width="${m.w}" height="${m.saveH}" rx="2" />
+          <rect class="ov-bar spend" x="${m.x}" y="${m.y}"
+                width="${m.w}" height="${m.h}" rx="3" />
+          ${
+            b.reference
+              ? `<rect class="ov-hatch-fill" x="${m.x}" y="${m.y}"
+                   width="${m.w}" height="${m.h}" rx="3" fill="url(#ov-hatch)" />`
+              : ''
+          }
           <text class="ov-xlabel" x="${m.cx}" y="${FRAME.h - 6}" text-anchor="middle">${escapeHtml(
             shortLabel(b, level)
           )}</text>
@@ -147,6 +151,16 @@ function chartCard(buckets, level, crumbs, month, now) {
 
   const anyRef = buckets.some((b) => b.reference);
   const anyMixed = buckets.some((b) => b.mixed);
+
+  const note = projection
+    ? `Day ${projection.elapsed} of ${projection.days}. At this pace the month ends near ${formatMinor(
+        projection.spendMinor
+      )}.`
+    : level === 'month'
+      ? 'Tap a month to see its weeks, then a week to see its days.'
+      : level === 'week'
+        ? 'Tap a week to see its days.'
+        : '';
 
   const trail = crumbs
     .map((c, i) =>
@@ -174,8 +188,12 @@ function chartCard(buckets, level, crumbs, month, now) {
         }</span>
         <span class="ov-row-nums">
           <span class="num spend">${formatMinor(b.spendMinor)}</span>
-          <span class="num save">${b.savedMinor ? formatMinor(b.savedMinor) : '—'}</span>
         </span>
+        ${
+          b.savedMinor
+            ? `<small class="ov-saved">${formatMinor(b.savedMinor)} into savings</small>`
+            : ''
+        }
       </button>`;
     })
     .join('');
@@ -183,6 +201,7 @@ function chartCard(buckets, level, crumbs, month, now) {
   return card(
     '',
     `<nav class="ov-crumbs">${trail}</nav>
+     <p class="ov-cap">Spent per ${level}</p>
      <svg class="ov-chart" viewBox="0 0 ${FRAME.w} ${FRAME.h}" role="img"
           aria-label="Spending and saving by ${level}">
        <defs>
@@ -192,27 +211,21 @@ function chartCard(buckets, level, crumbs, month, now) {
        </defs>
        ${grid}${bars}
      </svg>
-     <div class="ov-legend">
-       <span><i class="sw spend"></i>Spent</span>
-       <span><i class="sw save"></i>Saved</span>
-       ${projection ? '<span><i class="sw ghost"></i>Projected</span>' : ''}
-       ${anyRef ? '<span><i class="sw ref"></i>Imported, reference only</span>' : ''}
-       ${
-         anyMixed
-           ? '<span class="ov-note">Months marked “tracked only” also contain imported rows, which are left out of their totals.</span>'
-           : ''
-       }
-     </div>
-     <div class="ov-rows">${list}</div>`,
-    projection
-      ? `Day ${projection.elapsed} of ${projection.days}. At this pace the month ends near ${formatMinor(
-          projection.spendMinor
-        )}.`
-      : level === 'month'
-        ? 'Tap a month to see its weeks, then a week to see its days.'
-        : level === 'week'
-          ? 'Tap a week to see its days.'
-          : ''
+     ${
+       projection || anyRef || anyMixed
+         ? `<div class="ov-legend">
+             ${projection ? '<span><i class="sw ghost"></i>Projected</span>' : ''}
+             ${anyRef ? '<span><i class="sw ref"></i>Imported, reference only</span>' : ''}
+             ${
+               anyMixed
+                 ? '<span class="ov-note">Months marked “tracked only” also hold imported rows, left out of their totals.</span>'
+                 : ''
+             }
+           </div>`
+         : ''
+     }
+     ${note ? `<p class="hint ov-foot">${note}</p>` : ''}
+     <div class="ov-rows">${list}</div>`
   );
 }
 
@@ -255,9 +268,8 @@ function potCard(pot, goal, months, now) {
     `<div class="big">${formatMinor(pot.minor)}</div>
      <p class="big-sub">${pot.deposits} deposit${pot.deposits === 1 ? '' : 's'}${
        pot.withdrawals ? `, ${pot.withdrawals} withdrawal${pot.withdrawals === 1 ? '' : 's'}` : ''
-     }</p>
-     ${goalBlock}`,
-    'Every amount you logged as savings, less what you took back out. It does not reset when you are paid.'
+     } · does not reset when you are paid</p>
+     ${goalBlock}`
   );
 }
 

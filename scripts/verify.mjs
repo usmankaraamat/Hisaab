@@ -593,28 +593,36 @@ for (const [name, set] of [
   ['twelve months', bucketsOf(...Array.from({ length: 12 }, (_, i) => [100000 * (i + 1), 50000]))],
   ['a week of days', bucketsOf(...Array.from({ length: 7 }, () => [30000, 0]))],
   ['all zero', bucketsOf([0, 0], [0, 0])],
-  ['saving beats spending', bucketsOf([10000, 5000000])],
+  ['a lump savings deposit', bucketsOf([10000, 5000000])],
 ]) {
   const { max, base, bars } = barLayout(set);
-  const tallest = Math.max(...set.map((b) => Math.max(b.spendMinor, b.savedMinor)));
+  const tallest = Math.max(...set.map((b) => b.spendMinor));
   const inside = bars.every(
     (m) =>
-      m.spendX >= FRAME.left - 1 &&
-      m.saveX + m.w <= FRAME.w - FRAME.right + 1 &&
-      m.spendY >= FRAME.top - 0.01 &&
-      m.saveY >= FRAME.top - 0.01 &&
-      m.spendH >= 0 &&
-      m.saveH >= 0 &&
-      m.spendY + m.spendH <= base + 0.01
+      m.x >= FRAME.left - 1 &&
+      m.x + m.w <= FRAME.w - FRAME.right + 1 &&
+      m.y >= FRAME.top - 0.01 &&
+      m.h >= 0 &&
+      m.y + m.h <= base + 0.01
   );
   check(`${name}: every mark inside the frame`, inside, true);
   check(`${name}: the axis reaches the tallest bar`, max >= tallest, true);
-  check(`${name}: bars never wider than the cap`, bars.every((m) => m.w <= 14), true);
-  check(`${name}: the pair never overlaps`, bars.every((m) => m.spendX + m.w <= m.saveX), true);
+  check(`${name}: bars never wider than the cap`, bars.every((m) => m.w <= 24), true);
+  check(`${name}: bars never touch`, bars.every((m, i) =>
+    i === 0 || m.x >= bars[i - 1].x + bars[i - 1].w), true);
 }
 
+/* A single 50,000 deposit against a few thousand of daily spending used to set
+ * the y-scale and squash every spending bar flat. The chart plots one series. */
+const lump = barLayout(bucketsOf([10000, 5000000]));
+check('a savings lump no longer sets the scale', lump.max, 10000);
+check('so the spending bar fills the plot', Math.round(lump.bars[0].h), lump.plotH);
+
 check('a nice ceiling rounds up, not down', [ceilNice(1), ceilNice(1170000), ceilNice(0)],
-  [1, 2000000, 100]);
+  [1, 1250000, 100]);
+// Fine steps, so the tallest bar fills most of the frame rather than 60% of it.
+check('and lands close above the value',
+  [12014200, 5600, 99000].map((v) => ceilNice(v) / v).every((r) => r < 1.35), true);
 check('axis labels stay short', [shortMinor(1200000), shortMinor(45000), shortMinor(150000000)],
   ['12k', '450', '1500k']);
 check('the baseline is the zero line', gridLines(100000)[0].y, barLayout(bucketsOf([1, 1])).base);

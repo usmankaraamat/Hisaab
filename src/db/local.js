@@ -12,6 +12,14 @@
 
 import { personKey } from '../capture/split.js';
 
+/* Dev-only escape hatch for the visual harness in tools/preview.html, which
+ * renders a real view against a real export without standing up IndexedDB —
+ * headless Chrome starves it under virtual time. Gated on import.meta.env.DEV
+ * so the production build drops the branch entirely; the app itself never sets
+ * `window.__rows`. Two CSS collisions that only show up on screen were caught
+ * this way. */
+const PREVIEW = import.meta.env?.DEV && typeof window !== 'undefined' && !!window.__rows;
+
 const DB_NAME = 'hisaab';
 const DB_VERSION = 1;
 
@@ -388,6 +396,7 @@ export async function listTransactions({ limit = 200, includeDeleted = false } =
 }
 
 export async function allTransactions() {
+  if (PREVIEW) return window.__rows;
   const db = await openDB();
   const { t } = tx(db, ['transactions'], 'readonly');
   const all = await req(t.objectStore('transactions').getAll());
@@ -452,6 +461,7 @@ export async function upsertFromServer(rows) {
 }
 
 export async function getMeta(key, fallback = null) {
+  if (PREVIEW) return window.__meta?.[key] ?? fallback;
   const db = await openDB();
   const { t } = tx(db, ['meta'], 'readonly');
   const row = await req(t.objectStore('meta').get(key));

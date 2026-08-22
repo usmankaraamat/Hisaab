@@ -17,3 +17,7 @@ supabase/.temp/
 # the device via Settings → Import. scripts/verify.mjs and scripts/eval/ skip
 # their export-backed sections when it is absent.
 TransactionsLatest.csv
+
+# Visual harness fixtures — real financial data
+tools/preview-rows.json
+shot-*.png

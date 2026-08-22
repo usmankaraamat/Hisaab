@@ -281,7 +281,11 @@ ul.recent li, .day li {
 
 .card.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
 
-.card button {
+/* Action buttons only. A button that is *content* — a tappable chart row, a
+ * category bar, an inline text link — opts out by name, because this rule is
+ * (0,1,1) and would otherwise beat every single-class style those carry. Add
+ * new content buttons to the list rather than piling on overrides. */
+.card button:not(.cat):not(.ov-row):not(.link) {
   padding: 10px 16px;
   font: inherit;
   font-size: .9rem;
@@ -314,7 +318,9 @@ input[type='email'] {
 
 input[type='email']:focus { outline: none; border-color: var(--accent); }
 
-.card button + button { margin-left: 8px; }
+/* Spacing between adjacent *action* buttons only — stacked content rows sit
+ * flush against each other. */
+.card button:not(.cat):not(.ov-row):not(.link) + button:not(.cat):not(.ov-row):not(.link) { margin-left: 8px; }
 
 /* ---------- review ---------- */
 
@@ -774,7 +780,7 @@ label.stack input {
 .ov-grid { stroke: var(--line); stroke-width: 1; }
 .ov-tick, .ov-xlabel { fill: var(--muted); font-size: 8px; font-family: inherit; }
 .ov-bar.spend { fill: var(--ov-spend); }
-.ov-bar.save { fill: var(--ov-save); }
+.ov-bar.saved { fill: var(--ov-save); }
 .ov-ghost { fill: var(--ov-spend); opacity: .28; }
 
 /* Imported history: faded and hatched, so it cannot be mistaken for a month
@@ -794,7 +800,7 @@ label.stack input {
 .ov-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .ov-legend .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .ov-legend .sw.spend { background: var(--ov-spend); }
-.ov-legend .sw.save { background: var(--ov-save); }
+.ov-legend .sw.saved { background: var(--ov-save); }
 .ov-legend .sw.ghost { background: var(--ov-spend); opacity: .28; }
 .ov-legend .sw.ref { background: var(--muted); opacity: .4; }
 
@@ -811,11 +817,14 @@ label.stack input {
 
 .ov-rows { display: grid; }
 
+/* Grid, not flex: the savings footnote needs a row of its own, and the name
+ * needs `min-width: 0` or a long month label refuses to shrink and pushes the
+ * whole card wider than the screen. */
 .ov-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 2px 12px;
   width: 100%;
   padding: 9px 0;
   font: inherit;
@@ -830,7 +839,11 @@ label.stack input {
 
 .ov-row:last-child { border-bottom: 0; }
 .ov-row.flat { cursor: default; }
-.ov-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Saving is a lump every few weeks, not a series — a footnote under the row it
+ * happened in, rather than a second column fighting the amount for space. */
+.ov-saved { grid-column: 1 / -1; color: var(--muted); font-size: .74rem; }
 
 .ov-ref {
   margin-left: 6px;
@@ -843,7 +856,7 @@ label.stack input {
   border-radius: 999px;
 }
 
-.ov-row-nums { display: flex; gap: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ov-row-nums { justify-self: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-row-nums .num { font-weight: 600; }
 /* The dot beside the figure carries identity; the text stays ink. */
 .ov-row-nums .num::before {
@@ -856,7 +869,7 @@ label.stack input {
   vertical-align: middle;
 }
 .ov-row-nums .num.spend::before { background: var(--ov-spend); }
-.ov-row-nums .num.save::before { background: var(--ov-save); }
+.ov-row-nums .num.saved::before { background: var(--ov-save); }
 
 .overview .big { margin-top: 4px; font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .overview .big-sub { margin: 2px 0 12px; color: var(--muted); font-size: .85rem; }
@@ -875,3 +888,13 @@ label.stack input {
 .ov-goal .hint { margin: 8px 0 0; }
 
 .ov-legend .ov-note { display: block; width: 100%; margin-top: 2px; font-size: .72rem; }
+
+.ov-foot { margin: 0 0 8px; }
+
+/* Reference bars carry a hatch as well as a fade, so the distinction survives
+ * greyscale, printing and colour-vision deficiency. */
+.ov-hatch-fill { opacity: .55; }
+
+/* One series needs no legend box, but it does need naming — the bars are the
+ * only thing on the chart and nothing else says what they measure. */
+.ov-cap { margin: 0 0 2px; color: var(--text); font-size: .82rem; font-weight: 600; }
