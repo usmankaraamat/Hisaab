@@ -36,6 +36,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * what it looks like it means. See CATEGORIES in the enrichment prompt. */
 export const NON_SPEND = new Set(['Savings', 'Transfers & Loans']);
 
+/* A cash-count correction, not consumption. When the tracked balance drifts
+ * from the notes in your pocket, reconciling writes a single row of this
+ * category for the difference — so `cash` matches what you actually hold — and
+ * that row is deliberately absent from `spend` and the breakdown, because a
+ * correction is not a thing you bought. */
+export const RECONCILE = 'Reconcile';
+
 /* Deleted rows are gone; imported rows are reference only.
  *
  * The Bluecoins export covers a period lived with flatmates covering each
@@ -137,6 +144,37 @@ export function incomePeriod(rows, now = new Date()) {
 }
 
 /**
+ * The spending period, hardcoded to the calendar month rather than the last
+ * income entry.
+ *
+ * Anchoring to the income entry was the cause of a real bug: reconciling
+ * mid-month re-stamped the start of the period, which dropped the salary out of
+ * it and left the balance reading negative. Salary lands on the 1st, so the
+ * month is the right window regardless. The period runs from the first weekday
+ * of the month to the first weekday of the next — the 1st, unless it falls on a
+ * weekend, in which case the following Monday, because a payment dated the 1st
+ * only clears once the bank reopens.
+ */
+function firstWeekdayOfMonth(year, month) {
+  const d = new Date(year, month, 1);
+  const dow = d.getDay(); // 0 Sun … 6 Sat
+  if (dow === 0) d.setDate(2); // Sunday   -> Monday the 2nd
+  else if (dow === 6) d.setDate(3); // Saturday -> Monday the 3rd
+  return d;
+}
+
+export function calendarPeriod(now = new Date()) {
+  let start = firstWeekdayOfMonth(now.getFullYear(), now.getMonth());
+  // Early in a month whose 1st is a weekend, `now` can precede this month's
+  // start weekday — the period you are actually in began last month.
+  if (now.getTime() < start.getTime()) {
+    start = firstWeekdayOfMonth(now.getFullYear(), now.getMonth() - 1);
+  }
+  const end = firstWeekdayOfMonth(start.getFullYear(), start.getMonth() + 1);
+  return { periodStart: start.toISOString(), periodEnd: end.toISOString() };
+}
+
+/**
  * @param rows      every local transaction
  * @param opening   `{ amountMinor, at }` — what the wallet held at that instant.
  *                  Overrides the income anchor when it is the later of the two,
@@ -147,22 +185,31 @@ export function budgetSummary(
   { opening = null, savingsTargetMinor = 0, now = new Date() } = {}
 ) {
   const all = live(rows);
-  const period = incomePeriod(all, now);
+  const period = calendarPeriod(now);
+  const periodStartMs = new Date(period.periodStart).getTime();
+  const periodEndMs = new Date(period.periodEnd).getTime();
 
   const openingAt = opening?.at ? new Date(opening.at).getTime() : null;
-  const incomeAt = period.lastIncomeAt ? new Date(period.lastIncomeAt).getTime() : null;
+  const hasIncome = all.some((r) => r.direction === 'in' && r.category === 'Income');
 
   let sinceMs;
   let baseMinor;
-  if (openingAt !== null && (incomeAt === null || openingAt >= incomeAt)) {
+  let anchoredTo;
+  if (openingAt !== null && openingAt >= periodStartMs) {
+    // A cash count or opening balance stated inside the period is the most
+    // recent thing you know for certain, so it wins over the month anchor.
     sinceMs = openingAt;
     baseMinor = opening.amountMinor;
-  } else if (incomeAt !== null) {
-    sinceMs = incomeAt;
+    anchoredTo = 'opening';
+  } else if (hasIncome || openingAt !== null) {
+    sinceMs = periodStartMs;
     baseMinor = 0;
+    anchoredTo = 'calendar';
   } else {
-    sinceMs = -Infinity;
-    baseMinor = opening?.amountMinor ?? 0;
+    // Nothing to count forward from yet — no income logged and no balance set.
+    sinceMs = periodStartMs;
+    baseMinor = 0;
+    anchoredTo = 'none';
   }
 
   const inPeriod = all.filter((r) => new Date(r.occurred_at).getTime() >= sinceMs);
@@ -191,6 +238,10 @@ export function budgetSummary(
         continue;
       }
 
+      // A reconciliation credit is a correction to what the wallet held, not
+      // money earned — it belongs in cash but not in income.
+      if (r.category === RECONCILE) continue;
+
       // A repayment is money returning, not money earned. Counting it as income
       // would make a month look richer every time a friend settled up.
       if (!r.ledger_effect) incomeMinor += r.amount_minor;
@@ -208,6 +259,9 @@ export function budgetSummary(
     outMinor += r.amount_minor;
     if (r.category === 'Savings') savedMinor += r.amount_minor;
     else if (r.category === 'Transfers & Loans') transferMinor += r.amount_minor;
+    // A reconciliation charge reduces cash to what you counted, but it is a
+    // correction rather than something consumed, so it enters no spend bucket.
+    else if (r.category === RECONCILE) continue;
     // Still owed: an asset, not an expense. It belongs to the Ledger and is
     // deliberately absent from every figure on the Spending screen.
     else if (isOutstandingLoan(r)) lentOutMinor += r.amount_minor;
@@ -217,9 +271,8 @@ export function budgetSummary(
 
   const cashMinor = baseMinor + inMinor - outMinor;
 
-  const nextIncomeMs = period.nextIncomeAt ? new Date(period.nextIncomeAt).getTime() : null;
-  const daysLeft =
-    nextIncomeMs === null ? null : Math.max(1, Math.ceil((nextIncomeMs - now.getTime()) / DAY_MS));
+  const nextIncomeMs = periodEndMs;
+  const daysLeft = Math.max(1, Math.ceil((nextIncomeMs - now.getTime()) / DAY_MS));
 
   // Recurring charges already due inside this period. `subscriptions` reads the
   // whole history on purpose — a cycle cannot be detected from one period.
@@ -257,9 +310,14 @@ export function budgetSummary(
     cashMinor - committedMinor - savingsRemainingMinor - owed.iOweMinor;
 
   return {
-    since: sinceMs === -Infinity ? null : new Date(sinceMs).toISOString(),
-    anchoredTo: sinceMs === openingAt ? 'opening' : incomeAt !== null ? 'income' : 'none',
-    ...period,
+    since: new Date(sinceMs).toISOString(),
+    anchoredTo,
+    periodStart: period.periodStart,
+    periodEnd: period.periodEnd,
+    // Kept under the old name so the Spending card's "next expected" line and
+    // anything else reading it need no change: the period end is the next time
+    // money is expected to land.
+    nextIncomeAt: period.periodEnd,
     daysLeft,
 
     baseMinor,
@@ -319,6 +377,10 @@ export function categoryTotals(rows, { from = null, to = null, includeNonSpend =
 
   for (const r of live(rows)) {
     if (r.direction !== 'out') continue;
+    // A reconciliation charge is a correction, never a purchase — it stays out
+    // of the breakdown whatever else is included, so the bars keep meaning
+    // "what you bought".
+    if (r.category === RECONCILE) continue;
     if (!includeNonSpend) {
       if (NON_SPEND.has(r.category)) continue;
       if (r.ledger_effect === 'borrowed') continue;

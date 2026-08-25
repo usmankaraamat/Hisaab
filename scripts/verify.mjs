@@ -22,7 +22,7 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
-import { budgetSummary, categoryTotals, ON_OTHERS } from '../src/lib/budget.js';
+import { budgetSummary, categoryTotals, calendarPeriod, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
 import { barLayout, gridLines, ceilNice, shortMinor, FRAME } from '../src/lib/chart.js';
 import {
@@ -272,8 +272,10 @@ const ledgerJuly = [
 const asOfAug8 = new Date('2026-08-08T12:00:00.000Z');
 const b = budgetSummary(ledgerJuly, { now: asOfAug8 });
 
-check('the period starts at the last income', b.since, '2026-08-03T13:00:00.000Z');
-check('a salary implies the next one a month later', b.nextIncomeAt.slice(0, 10), '2026-09-03');
+// August 2026 opens on a Saturday, so the period starts the following Monday.
+check('the period starts at the first weekday of the month', b.since, '2026-08-03T00:00:00.000Z');
+check('the period runs to the first weekday of the next month',
+  b.nextIncomeAt.slice(0, 10), '2026-09-01');
 check('spending before the period is excluded', b.spendMinor, 100000);
 check('an investment is not spending', b.savedMinor, 5000000);
 check('money lent out is not spending', b.lentOutMinor, 44000);
@@ -285,10 +287,10 @@ check('cash counts everything that actually moved', b.cashMinor, 7856000);
 check('what you owe is subtracted from what is safe to spend',
   b.safeToSpendMinor, 7856000 - 50000);
 check('and what is owed to you is not added to it', b.owedToMeMinor, 44000);
-// Aug 8 12:00 to Sep 3 13:00 is 26 days and an hour, and a part day still has
+// Aug 8 12:00 to Sep 1 00:00 is 23 days and a half, and a part day still has
 // to be spent through, so it rounds up.
-check('the allowance divides by the days remaining', b.daysLeft, 27);
-check('the allowance is quoted in whole rupees', b.dailyMinor, 289100);
+check('the allowance divides by the days remaining', b.daysLeft, 24);
+check('the allowance is quoted in whole rupees', b.dailyMinor, 325200);
 
 const saving = budgetSummary(ledgerJuly, { savingsTargetMinor: 6000000, now: asOfAug8 });
 check('a savings target is deducted before the allowance, not after',
@@ -301,13 +303,14 @@ const withOpening = budgetSummary(ledgerJuly, {
   opening: { amountMinor: 2000000, at: '2026-08-06T00:00:00.000Z' },
   now: asOfAug8,
 });
-check('a later opening balance overrides the income anchor', withOpening.anchoredTo, 'opening');
+check('an opening balance set inside the period overrides the month anchor',
+  withOpening.anchoredTo, 'opening');
 check('and rows before it stop counting', withOpening.cashMinor, 2000000);
-check('an earlier opening balance defers to the income anchor',
+check('an opening balance before the period defers to the month anchor',
   budgetSummary(ledgerJuly, {
     opening: { amountMinor: 2000000, at: '2026-08-01T00:00:00.000Z' },
     now: asOfAug8,
-  }).anchoredTo, 'income');
+  }).anchoredTo, 'calendar');
 check('with no income and no opening there is nothing to report',
   budgetSummary([spend({ amount_minor: 5000 })], { now: asOfAug8 }).anchoredTo, 'none');
 
@@ -318,6 +321,40 @@ check('savings never appears as a spending category',
   cats.some((c) => c.category === 'Savings'), false);
 check('an uncategorised row is reported, not dropped',
   categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
+
+console.log('\n--- the period is the calendar month, and reconciling does not move it ---');
+
+check('a month opening on a weekday starts on the 1st',
+  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodStart, '2026-09-01T00:00:00.000Z');
+check('and runs to the 1st of the next month',
+  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodEnd, '2026-10-01T00:00:00.000Z');
+check('a month opening on a weekend starts on the first Monday',
+  calendarPeriod(new Date('2026-11-15T12:00:00.000Z')).periodStart, '2026-11-02T00:00:00.000Z');
+check("a day before this month's start weekday still belongs to last period",
+  calendarPeriod(new Date('2026-11-01T09:00:00.000Z')).periodStart, '2026-10-01T00:00:00.000Z');
+
+/* Reconciling used to re-stamp the opening balance, which reset the period and
+ * dropped the salary out of it — the source of the negative balances. Now it
+ * writes one honest "Reconcile cash" row: cash moves to what was counted, the
+ * period stays put, and the correction is kept out of income, spend and the
+ * breakdown, because it is not something earned or bought. */
+const recon = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 10000000, category: 'Income',
+          occurred_at: '2026-08-03T13:00:00.000Z' }),
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries' }),
+  // Held more than tracked: a correction credit.
+  spend({ raw_name: 'Reconcile cash', direction: 'in', amount_minor: 30000, category: RECONCILE }),
+  // Held less than tracked, another day: a correction charge.
+  spend({ raw_name: 'Reconcile cash', amount_minor: 5000, category: RECONCILE,
+          occurred_at: '2026-08-06T10:00:00.000Z' }),
+];
+const rb = budgetSummary(recon, { now: asOfAug8 });
+check('a reconciliation moves cash to what was counted',
+  rb.cashMinor, 10000000 + 30000 - 100000 - 5000);
+check('but a correction is not counted as income', rb.incomeMinor, 10000000);
+check('nor as spending', rb.spendMinor, 100000);
+check('and never appears in the breakdown',
+  categoryTotals(recon, { from: rb.since }).some((c) => c.category === RECONCILE), false);
 
 console.log('\n--- what you spent on others, and what is merely owed ---');
 

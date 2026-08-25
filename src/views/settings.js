@@ -1,6 +1,8 @@
 import { importBluecoins, summarise } from '../import/bluecoins.js';
 import {
   allTransactions,
+  addTransaction,
+  updateTransaction,
   countTransactions,
   countEvents,
   resetAll,
@@ -8,7 +10,7 @@ import {
   setMeta,
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
-import { budgetSummary } from '../lib/budget.js';
+import { budgetSummary, RECONCILE } from '../lib/budget.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
@@ -27,8 +29,10 @@ export async function renderSettings(root) {
       <div class="card">
         <h3>Budget</h3>
         <p class="hint">
-          "Money left" counts forward from your last income entry. Set an opening balance
-          if you want it anchored to what you actually hold instead — the later of the two wins.
+          "Money left" counts forward from the start of the month — the 1st, or the first
+          Monday if the 1st is a weekend, since that is when pay dated the 1st clears. Set an
+          opening balance to anchor it to what you actually hold instead; a balance set later
+          in the month wins over the month start.
           A savings target is subtracted <em>before</em> the daily allowance, not left over after it.
         </p>
         <label class="stack">Opening balance
@@ -127,7 +131,7 @@ export async function renderSettings(root) {
     openingInput.value = opening ? String(opening.amountMinor / 100) : '';
     openingAt.textContent = opening
       ? `Counting from ${new Date(opening.at).toLocaleString()}.`
-      : 'Not set — counting from your last income entry.';
+      : 'Not set — counting from the start of the month.';
     targetInput.value = Number(target) ? String(Number(target) / 100) : '';
   }
 
@@ -204,9 +208,13 @@ export async function renderSettings(root) {
 
   /* Reconciliation.
    *
-   * Re-stamping the opening balance is all it takes: everything after that
-   * instant is counted forward from the number you just verified. The drift is
-   * logged so a pattern of always being short is visible rather than absorbed. */
+   * Recording the difference as one honest "Reconcile cash" row is all it takes:
+   * cash moves to what you counted, and — unlike re-stamping the opening balance,
+   * which used to reset the start of the period and drop this month's salary out
+   * of it, leaving the balance negative — the period stays put. The row is a
+   * correction, not a purchase, so it never touches the spending breakdown or the
+   * daily allowance. The drift is also logged so a pattern of always being short
+   * is visible rather than absorbed. */
   const reconAmount = root.querySelector('#recon-amount');
   const reconNow = root.querySelector('#recon-now');
   const reconMsg = root.querySelector('#recon-msg');
@@ -241,9 +249,26 @@ export async function renderSettings(root) {
     const before = await refreshRecon();
     const driftMinor = actualMinor - before.cashMinor;
     const at = new Date().toISOString();
-    await setMeta('budget.opening', { amountMinor: actualMinor, at });
+
+    // The correction is a real, visible transaction so the balance stays
+    // honest without moving the period. It is stamped as already enriched so
+    // the model never re-files it out of the Reconcile category the budget maths
+    // keys on.
+    if (driftMinor !== 0) {
+      const rec = await addTransaction({
+        raw_name: 'Reconcile cash',
+        amount_minor: Math.abs(driftMinor),
+        direction: driftMinor > 0 ? 'in' : 'out',
+        category: RECONCILE,
+        occurred_at: at,
+      });
+      await updateTransaction(rec.id, { enriched: 1, enriched_at: at });
+    }
+
     await setMeta('budget.lastReconciled', { at, driftMinor, actualMinor });
     reconAmount.value = '';
+    invalidate();
+    syncNow().catch(() => {});
     await Promise.all([refreshBudget(), refreshRecon()]);
     reconMsg.className = 'ok';
     reconMsg.textContent =
@@ -251,14 +276,16 @@ export async function renderSettings(root) {
         ? 'Exactly right. Nothing to adjust.'
         : `Adjusted by ${formatMinor(Math.abs(driftMinor))} — you had ${
             driftMinor > 0 ? 'more' : 'less'
-          } than tracked. Counting forward from now.`;
+          } than tracked, recorded as a "Reconcile cash" ${
+            driftMinor > 0 ? 'credit' : 'charge'
+          }.`;
   });
 
   root.querySelector('#clear-opening').addEventListener('click', async () => {
     await setMeta('budget.opening', null);
     await refreshBudget();
     budgetMsg.className = 'ok';
-    budgetMsg.textContent = 'Cleared. Counting from your last income entry.';
+    budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
 
   async function refreshAccount() {

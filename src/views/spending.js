@@ -50,18 +50,31 @@ export async function renderSpending(root) {
 
   host.innerHTML = [
     leftCard(budget),
-    breakdownCard(rows, budget),
+    '<div class="card" id="breakdown-card"></div>',
     committedCard(budget),
     faresCard(rows),
     pricesCard(rows),
   ].join('');
 
-  // Every category row is a link into a filtered History, which is the whole
-  // point of having categories at all.
-  for (const el of host.querySelectorAll('[data-cat]')) {
-    el.addEventListener('click', () => go('history', { cat: el.dataset.cat }));
-  }
+  // The breakdown carries its own date range, defaulting to this period, so the
+  // same screen answers "where did it go this month" and "where did it go in
+  // March". It repaints in place as the range changes; the other cards are
+  // period-fixed and rendered once.
+  const breakdownHost = host.querySelector('#breakdown-card');
+  const range = { from: toDateInput(budget.since), to: '' };
+  paintBreakdown(breakdownHost, rows, budget, range);
 }
+
+/** ISO instant -> the "YYYY-MM-DD" a date input expects, in local time. */
+function toDateInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+const startOfDay = (s) => (s ? new Date(`${s}T00:00:00`).toISOString() : null);
+const endOfDay = (s) => (s ? new Date(`${s}T23:59:59.999`).toISOString() : null);
 
 /**
  * A pointer, not a second opinion.
@@ -116,7 +129,7 @@ function leftCard(b) {
   const period =
     b.anchoredTo === 'opening'
       ? `Since your opening balance on ${since}`
-      : `Since you were paid on ${since}`;
+      : `This month, from ${since}`;
 
   return card(
     'Money left',
@@ -164,14 +177,30 @@ function leftCard(b) {
  * Everything bought for other people sits in one row rather than spread through
  * Groceries, Health and Shopping, and only once it is written off: until then it
  * is a debt, and debts are the Ledger's, not this screen's.
+ *
+ * The card owns a date range, defaulting to this period. A bar used to count
+ * every matching row for all time, so tapping "5,000 on Eating Out" opened
+ * 20,000 of entries, 15,000 of it from earlier months — the totals and the
+ * drill-down disagreed. Now both are scoped to the same window, and the range
+ * carries through to History so the two always show the same set. The aside
+ * (money that moved without being spent) stays tied to the period, so it is
+ * shown only while the range is the default one it describes.
  */
-function breakdownCard(rows, b) {
-  const spend = categoryTotals(rows, { from: b.since });
+function paintBreakdown(hostEl, rows, b, range) {
+  const isDefault = range.from === toDateInput(b.since) && !range.to;
+  const from = startOfDay(range.from);
+  const to = endOfDay(range.to);
+  const spend = categoryTotals(rows, { from, to });
   const total = spend.reduce((a, c) => a + c.totalMinor, 0);
 
-  if (!spend.length && !b.savedMinor && !b.transferMinor) {
-    return card('Where it went', '<p class="empty">Nothing spent this period.</p>');
-  }
+  const controls = `<div class="date-range">
+    <label class="stack">From
+      <input type="date" id="bk-from" value="${range.from}" />
+    </label>
+    <label class="stack">To
+      <input type="date" id="bk-to" value="${range.to}" />
+    </label>
+  </div>`;
 
   const bars = spend
     .map((c) => {
@@ -189,25 +218,45 @@ function breakdownCard(rows, b) {
     })
     .join('');
 
-  const aside = [
-    b.savedMinor > 0 ? row('Saved or invested', formatMinor(b.savedMinor)) : '',
-    // Net of redemptions, so this flips rather than showing a negative "saved".
-    b.savedMinor < 0 ? row('Taken back out of savings', formatMinor(-b.savedMinor), 'up') : '',
-    b.transferMinor ? row('Transferred or lent', formatMinor(b.transferMinor)) : '',
-    /* Nothing outstanding appears here, in either direction. A period-gross
-     * "still owed 6,440" sitting a screen away from the Ledger's netted 4,050
-     * is the same trap as before, just relabelled. The one figure this screen
-     * shows is the Ledger's own, via ledgerLine above. */
-  ].join('');
+  const aside = isDefault
+    ? [
+        b.savedMinor > 0 ? row('Saved or invested', formatMinor(b.savedMinor)) : '',
+        // Net of redemptions, so this flips rather than showing a negative "saved".
+        b.savedMinor < 0 ? row('Taken back out of savings', formatMinor(-b.savedMinor), 'up') : '',
+        b.transferMinor ? row('Transferred or lent', formatMinor(b.transferMinor)) : '',
+      ].join('')
+    : '';
 
-  return card(
-    'Where it went',
-    `<div class="cats">${bars}</div>
-     ${aside ? `<div class="aside">${aside}</div>` : ''}`,
-    `${formatMinor(total)} spent. Tap a category to see the entries.${
+  const body = spend.length
+    ? `<div class="cats">${bars}</div>${aside ? `<div class="aside">${aside}</div>` : ''}`
+    : '<p class="empty">Nothing spent in this range.</p>';
+
+  hostEl.innerHTML = `
+    <h3>Where it went</h3>
+    <p class="hint">${formatMinor(total)} spent. Tap a category to see the entries.${
       aside ? ' Below the line is money that moved without being spent.' : ''
-    }`
-  );
+    }</p>
+    ${controls}
+    ${body}`;
+
+  // Each bar links into a History filtered to the same category *and* range, so
+  // the drill-down can never show more than the bar counted.
+  for (const el of hostEl.querySelectorAll('[data-cat]')) {
+    el.addEventListener('click', () => {
+      const params = { cat: el.dataset.cat };
+      if (range.from) params.from = range.from;
+      if (range.to) params.to = range.to;
+      go('history', params);
+    });
+  }
+
+  const repaint = () => {
+    range.from = hostEl.querySelector('#bk-from').value;
+    range.to = hostEl.querySelector('#bk-to').value;
+    paintBreakdown(hostEl, rows, b, range);
+  };
+  hostEl.querySelector('#bk-from').addEventListener('change', repaint);
+  hostEl.querySelector('#bk-to').addEventListener('change', repaint);
 }
 
 function committedCard(b) {

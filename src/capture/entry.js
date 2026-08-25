@@ -13,26 +13,13 @@ import {
   addTransaction,
   addTransactions,
   deleteTransaction,
-  listTransactions,
   allTransactions,
   getMeta,
 } from '../db/local.js';
-import { formatMinor, formatTxnAmount } from '../lib/money.js';
+import { formatMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
-import { budgetSummary } from '../lib/budget.js';
+import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
 import { findDuplicate } from '../lib/dupes.js';
-import { txnLabel } from '../lib/label.js';
-
-const RELATIVE = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
-
-function timeAgo(iso) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.round(diffMs / 60000);
-  if (Math.abs(mins) < 60) return RELATIVE.format(-mins, 'minute');
-  const hours = Math.round(mins / 60);
-  if (Math.abs(hours) < 24) return RELATIVE.format(-hours, 'hour');
-  return RELATIVE.format(-Math.round(hours / 24), 'day');
-}
 
 export async function renderAdd(root) {
   root.innerHTML = `
@@ -77,8 +64,8 @@ export async function renderAdd(root) {
 
       <p class="allowance" id="allowance" hidden></p>
 
-      <h2 class="recent-head">Recent</h2>
-      <ul class="recent" id="recent"></ul>
+      <h2 class="recent-head">Spending so far</h2>
+      <div class="spend-tiles" id="spend-tiles"></div>
     </section>
   `;
 
@@ -90,7 +77,7 @@ export async function renderAdd(root) {
   const suggestions = root.querySelector('#suggestions');
   const dirButtons = [...root.querySelectorAll('.direction button')];
   const toast = root.querySelector('#toast');
-  const recentList = root.querySelector('#recent');
+  const spendTiles = root.querySelector('#spend-tiles');
   const datalist = root.querySelector('#known-names');
   const warning = root.querySelector('#surge');
   const splitBox = root.querySelector('#split');
@@ -318,21 +305,39 @@ export async function renderAdd(root) {
     }
   }
 
-  async function refreshRecent() {
-    const rows = await listTransactions({ limit: 6 });
-    recentList.innerHTML = '';
-    if (!rows.length) {
-      recentList.innerHTML = '<li class="empty">Nothing yet. Type an expense above.</li>';
-      return;
-    }
-    for (const r of rows) {
-      const li = document.createElement('li');
-      li.innerHTML = `
-        <span class="r-name">${escapeHtml(txnLabel(r))}</span>
-        <span class="r-meta">${timeAgo(r.occurred_at)}</span>
-        <span class="r-amt ${r.direction}">${formatTxnAmount(r)}</span>`;
-      recentList.append(li);
-    }
+  /**
+   * Spending at a glance, on the screen where money gets spent. The full list
+   * lives in History; here the useful thing is the running total for the windows
+   * a habit shows up in — today, this week, this month.
+   *
+   * "Spending" is exactly what the Spending tab counts: consumption plus what
+   * you spent on other people and wrote off. Savings, transfers, money still
+   * owed and reconciliation corrections are all left out, via `categoryTotals`,
+   * so these tiles and that screen can never disagree.
+   */
+  function refreshSpendTiles() {
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Monday-start week, matching the payday-weekend fallback used elsewhere.
+    const startWeek = new Date(startToday);
+    startWeek.setDate(startToday.getDate() - ((startToday.getDay() + 6) % 7));
+    const startMonth = new Date(calendarPeriod(now).periodStart);
+
+    const spent = (from) =>
+      categoryTotals(history, { from: from.toISOString() }).reduce((a, c) => a + c.totalMinor, 0);
+
+    const tiles = [
+      ['Today', spent(startToday)],
+      ['This week', spent(startWeek)],
+      ['This month', spent(startMonth)],
+    ];
+    spendTiles.innerHTML = tiles
+      .map(
+        ([label, minor]) =>
+          `<div class="spend-tile"><span class="st-label">${label}</span>
+           <span class="st-amt">${formatMinor(minor)}</span></div>`
+      )
+      .join('');
   }
 
   /**
@@ -374,8 +379,8 @@ export async function renderAdd(root) {
   async function refreshAll() {
     history = await allTransactions();
     people = [...new Set(history.map((r) => r.counterparty_name).filter(Boolean))];
+    refreshSpendTiles();
     await Promise.all([
-      refreshRecent(),
       refreshChips(),
       refreshNames(),
       refreshSuggestions(),

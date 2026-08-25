@@ -111,13 +111,53 @@ never come, and a spending limit should not be inflated by an optimistic
 assumption. Both figures are the Ledger's own — see below.
 
 `safe ÷ days left` sits under the capture input, because that is the only place a
-number can change a decision. The period runs from your last income entry, not
-the calendar: a salary landing on the 3rd makes "this month" the wrong window and
-every allowance computed from it wrong for three days.
+number can change a decision. The period is the calendar month, anchored to the
+first weekday — the 1st, or the following Monday when the 1st is a weekend, since
+pay dated the 1st only clears once the bank reopens. It was once anchored to the
+last income entry instead, on the theory that a salary landing on the 3rd makes
+"this month" the wrong window; but that made reconciling mid-month re-stamp the
+start of the period, drop the salary out of it, and leave the balance reading
+negative. Pay lands on the 1st, so the month is the right window, and fixing it
+there is what lets reconciling be a correction rather than a reset — see below.
 
 The savings target is deducted **before** the allowance, not left over after it.
 Saving what remains at the end of the month is exactly the thing that does not
 work.
+
+## Reconciling is a correction, not a reset
+
+Tracked balances drift — a missed entry, a rounding, a note handed over and
+forgotten. **Settings → Count your cash** takes what you actually hold and
+records the difference as a single **Reconcile cash** row: an incoming entry when
+you held more than tracked, an outgoing one when you held less. Cash then matches
+what you counted, and because it is an ordinary dated row inside the current
+period, the period never moves.
+
+That is the whole fix for a long-standing bug. Reconciling used to re-stamp the
+opening balance to *now*, which restarted the period and dropped the month's
+salary out of it, so the balance dived negative straight after a count. A
+correction row leaves the salary where it is.
+
+A Reconcile cash row is deliberately kept out of `spend`, the breakdown and the
+daily allowance: it is neither something earned nor something bought, only the
+gap between the ledger and your pocket. It still shows in History, so the
+adjustment is visible rather than silent.
+
+## Seeing spending by date
+
+The Spending breakdown and History both carry a start/end date range, defaulting
+to the current period. A category bar used to total every matching row for all
+time, so tapping "5,000 on Eating Out" could open 20,000 of entries with 15,000
+of it from earlier months — the figure and its drill-down disagreed. Both are now
+scoped to the same window, and the range travels with the link, so what you tap
+and what you land on are always the same set. Pick any earlier month to read its
+breakdown the same way.
+
+The capture screen carries the running totals that actually shape a habit —
+**today**, **this week**, **this month** — in place of a list of recent rows,
+which History already holds. "Spending" there means exactly what the Spending tab
+counts: savings, transfers, money still owed and reconciliation corrections are
+all left out.
 
 ## One number, one home
 
