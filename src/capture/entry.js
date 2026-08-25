@@ -19,7 +19,10 @@ import {
 import { formatMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
 import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
+import { sparkPoints } from '../lib/chart.js';
 import { findDuplicate } from '../lib/dupes.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function renderAdd(root) {
   root.innerHTML = `
@@ -307,37 +310,104 @@ export async function renderAdd(root) {
 
   /**
    * Spending at a glance, on the screen where money gets spent. The full list
-   * lives in History; here the useful thing is the running total for the windows
-   * a habit shows up in — today, this week, this month.
+   * lives in History; here the useful thing is not another list but the shape of
+   * a habit — today, this week, this month, each as a running total with a
+   * sparkline of the recent comparable windows and a read on whether you are
+   * above or below your usual pace.
    *
-   * "Spending" is exactly what the Spending tab counts: consumption plus what
-   * you spent on other people and wrote off. Savings, transfers, money still
-   * owed and reconciliation corrections are all left out, via `categoryTotals`,
-   * so these tiles and that screen can never disagree.
+   * "Spending" is exactly what the Spending tab counts (via `categoryTotals`):
+   * consumption plus what you wrote off on others. Savings, transfers, money
+   * still owed and reconciliation corrections are all left out, so a tile and
+   * that screen can never disagree.
+   *
+   * The delta is pace-fair: a partial current window is compared against the
+   * same fraction of a typical complete one, so "this month" does not read as
+   * "down 80%" on the 3rd.
    */
+  function spendBetween(from, to) {
+    return categoryTotals(history, {
+      from: from.toISOString(),
+      to: new Date(to.getTime() - 1).toISOString(),
+    }).reduce((a, c) => a + c.totalMinor, 0);
+  }
+
+  function tileStat(label, ranges, now) {
+    // ranges: [{start, end}] oldest→newest, last is the current (maybe partial).
+    const values = ranges.map((r) => spendBetween(r.start, r.end));
+    const cur = ranges.at(-1);
+    const current = values.at(-1);
+    const priors = values.slice(0, -1);
+
+    const span = cur.end.getTime() - cur.start.getTime();
+    const elapsed = Math.min(1, Math.max(0, (now.getTime() - cur.start.getTime()) / span));
+    const typical = priors.length ? priors.reduce((a, v) => a + v, 0) / priors.length : 0;
+    const typicalSoFar = typical * elapsed;
+    const deltaPct =
+      typicalSoFar > 0 ? Math.round(((current - typicalSoFar) / typicalSoFar) * 100) : null;
+
+    const pts = sparkPoints(values);
+    const last = pts.at(-1);
+    const spark =
+      values.some((v) => v > 0) && values.length > 1
+        ? `<svg class="spark" width="76" height="24" viewBox="0 0 76 24" aria-hidden="true">
+             <polyline class="spark-line" points="${pts.map((p) => `${p.x},${p.y}`).join(' ')}" />
+             <circle class="spark-dot" cx="${last.x}" cy="${last.y}" r="2" />
+           </svg>`
+        : '';
+
+    const delta =
+      deltaPct === null || deltaPct === 0
+        ? ''
+        : `<span class="st-delta ${deltaPct > 0 ? 'st-up' : 'st-down'}">${
+            deltaPct > 0 ? '▲' : '▼'
+          } ${Math.abs(deltaPct)}% vs usual</span>`;
+
+    return `<div class="spend-tile">
+      <span class="st-label">${label}</span>
+      <span class="st-amt">${formatMinor(current)}</span>
+      ${spark}
+      ${delta}
+    </div>`;
+  }
+
   function refreshSpendTiles() {
     const now = new Date();
-    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    // Monday-start week, matching the payday-weekend fallback used elsewhere.
-    const startWeek = new Date(startToday);
-    startWeek.setDate(startToday.getDate() - ((startToday.getDay() + 6) % 7));
-    const startMonth = new Date(calendarPeriod(now).periodStart);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const spent = (from) =>
-      categoryTotals(history, { from: from.toISOString() }).reduce((a, c) => a + c.totalMinor, 0);
+    // Last 7 days, today last.
+    const dayRanges = [];
+    for (let k = 6; k >= 0; k--) {
+      const start = new Date(startOfToday);
+      start.setDate(startOfToday.getDate() - k);
+      dayRanges.push({ start, end: new Date(start.getTime() + DAY_MS) });
+    }
 
-    const tiles = [
-      ['Today', spent(startToday)],
-      ['This week', spent(startWeek)],
-      ['This month', spent(startMonth)],
-    ];
-    spendTiles.innerHTML = tiles
-      .map(
-        ([label, minor]) =>
-          `<div class="spend-tile"><span class="st-label">${label}</span>
-           <span class="st-amt">${formatMinor(minor)}</span></div>`
-      )
-      .join('');
+    // Last 6 Monday-start weeks, this week last. Monday matches the
+    // payday-weekend fallback used for the month boundary.
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfToday.getDate() - ((startOfToday.getDay() + 6) % 7));
+    const weekRanges = [];
+    for (let k = 5; k >= 0; k--) {
+      const start = new Date(startOfWeek);
+      start.setDate(startOfWeek.getDate() - k * 7);
+      weekRanges.push({ start, end: new Date(start.getTime() + 7 * DAY_MS) });
+    }
+
+    // Last 6 periods, this one last. A timestamp just before a period's start
+    // lands in the previous period, so calendarPeriod walks itself backwards.
+    const monthRanges = [];
+    let probe = now;
+    for (let k = 0; k < 6; k++) {
+      const p = calendarPeriod(probe);
+      monthRanges.unshift({ start: new Date(p.periodStart), end: new Date(p.periodEnd) });
+      probe = new Date(new Date(p.periodStart).getTime() - 1);
+    }
+
+    spendTiles.innerHTML = [
+      tileStat('Today', dayRanges, now),
+      tileStat('This week', weekRanges, now),
+      tileStat('This month', monthRanges, now),
+    ].join('');
   }
 
   /**

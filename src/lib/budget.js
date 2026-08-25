@@ -106,6 +106,22 @@ export function isWrittenOffShare(row) {
 }
 
 /**
+ * Consumption, for the breakdown and everything that has to agree with it: out,
+ * not saved or transferred, not something someone else paid for, not still owed,
+ * and not a reconciliation correction. One predicate shared by the Spending
+ * screen, the home tiles and the burn-down, so those three can never disagree.
+ */
+export function countsAsSpend(row) {
+  return (
+    row.direction === 'out' &&
+    !NON_SPEND.has(row.category) &&
+    row.ledger_effect !== 'borrowed' &&
+    !isOutstandingLoan(row) &&
+    row.category !== RECONCILE
+  );
+}
+
+/**
  * When the money last arrived, and when it is next expected.
  *
  * Anchoring to income rather than the calendar is deliberate: a salary landing
@@ -397,4 +413,52 @@ export function categoryTotals(rows, { from = null, to = null, includeNonSpend =
   }
 
   return [...totals.values()].sort((a, b) => b.totalMinor - a.totalMinor);
+}
+
+/**
+ * The burn-down: cumulative spend across the days of a period, against an even
+ * "ideal" burn of the whole spendable envelope. It answers a question the daily
+ * allowance only lets you infer — am I ahead of pace or behind?
+ *
+ * Pure over rows and dates. Cumulative is indexed by day from the period start
+ * so both lines can be drawn against one day-based x-axis.
+ *
+ * @param budgetMinor  the period's spendable envelope — what has been spent so
+ *                     far plus what is still safe to spend. The ideal line runs
+ *                     from 0 at the start to this at the end.
+ */
+export function spendPace(rows, { start, end, now = new Date(), budgetMinor = 0 } = {}) {
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  const nowMs = Math.min(now.getTime(), endMs);
+  const totalDays = Math.max(1, Math.round((endMs - startMs) / DAY_MS));
+  const elapsed = Math.max(0, Math.min(totalDays, Math.ceil((nowMs - startMs) / DAY_MS)));
+
+  const perDay = new Array(totalDays + 1).fill(0);
+  for (const r of live(rows)) {
+    if (!countsAsSpend(r)) continue;
+    const t = new Date(r.occurred_at).getTime();
+    if (t < startMs || t >= endMs) continue;
+    const day = Math.floor((t - startMs) / DAY_MS);
+    if (day >= 0 && day <= totalDays) perDay[day] += r.amount_minor;
+  }
+
+  const cumulative = [0];
+  let run = 0;
+  for (let d = 0; d < elapsed; d++) {
+    run += perDay[d];
+    cumulative.push(run);
+  }
+
+  const idealAtNowMinor = Math.round((budgetMinor * elapsed) / totalDays);
+  return {
+    totalDays,
+    elapsed,
+    cumulative,
+    spentMinor: run,
+    budgetMinor,
+    idealAtNowMinor,
+    // Positive means spending faster than an even burn would — ahead of pace.
+    overMinor: run - idealAtNowMinor,
+  };
 }

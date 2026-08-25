@@ -19,9 +19,10 @@
  */
 
 import { allTransactions, getMeta } from '../db/local.js';
-import { budgetSummary, categoryTotals, ON_OTHERS } from '../lib/budget.js';
+import { budgetSummary, categoryTotals, spendPace, ON_OTHERS } from '../lib/budget.js';
 import { savingsPot } from '../lib/trends.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
+import { bridgeLayout, linePoints, gridLines, ceilNice, FRAME } from '../lib/chart.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { go } from '../nav.js';
@@ -50,6 +51,8 @@ export async function renderSpending(root) {
 
   host.innerHTML = [
     leftCard(budget),
+    bridgeCard(budget),
+    paceCard(rows, budget, now),
     '<div class="card" id="breakdown-card"></div>',
     committedCard(budget),
     faresCard(rows),
@@ -166,6 +169,133 @@ function leftCard(b) {
      }
      ${ledgerLine(b)}`,
     `${period}${until ? `, next expected ${until}` : ''}.`
+  );
+}
+
+/**
+ * The same subtraction as the card above, drawn as a bridge so the arithmetic is
+ * visible rather than asserted: the wallet, less the bills and the savings and
+ * what you owe, is what is safe. Each chip steps down from where the last left
+ * off; the final bar is the answer, green when there is room and red when the
+ * period is already over budget. Skipped entirely when nothing is deducted —
+ * there is no story to draw when cash and safe are the same number.
+ */
+const WF = { w: 340, h: 172, top: 24, right: 8, bottom: 30, left: 8 };
+
+function bridgeCard(b) {
+  if (b.anchoredTo === 'none') return '';
+  const steps = [];
+  if (b.committedMinor) steps.push({ label: 'Bills', minor: -b.committedMinor });
+  if (b.savingsRemainingMinor) steps.push({ label: 'To save', minor: -b.savingsRemainingMinor });
+  if (b.iOweMinor) steps.push({ label: 'You owe', minor: -b.iOweMinor });
+  if (!steps.length) return '';
+
+  const { y, bars, levels } = bridgeLayout({ startMinor: b.cashMinor, steps }, { frame: WF });
+  const labelFor = (bar, i) =>
+    i === 0 ? 'Wallet' : i === bars.length - 1 ? 'Safe' : bar.label;
+
+  const connectors = bars
+    .slice(0, -1)
+    .map((bar, i) => {
+      const ly = y(levels[i]);
+      return `<line class="wf-link" x1="${bar.x + bar.w}" y1="${ly}" x2="${bars[i + 1].x}" y2="${ly}" />`;
+    })
+    .join('');
+
+  const rects = bars
+    .map((bar, i) => {
+      const total = bar.kind === 'total';
+      const cls =
+        i === bars.length - 1
+          ? bar.valueMinor < 0
+            ? 'wf-bar end neg'
+            : 'wf-bar end pos'
+          : total
+            ? 'wf-bar start'
+            : 'wf-bar step';
+      const valueText =
+        bar.kind === 'total'
+          ? formatMinor(bar.valueMinor)
+          : `−${formatMinor(Math.abs(bar.valueMinor))}`;
+      return `
+        <rect class="${cls}" x="${bar.x}" y="${bar.y}" width="${bar.w}" height="${bar.h}" rx="3" />
+        <text class="wf-val" x="${bar.cx}" y="${bar.y - 6}" text-anchor="middle">${valueText}</text>
+        <text class="wf-lab" x="${bar.cx}" y="${WF.h - 8}" text-anchor="middle">${escapeHtml(
+          labelFor(bar, i)
+        )}</text>`;
+    })
+    .join('');
+
+  return card(
+    'How “safe” is worked out',
+    `<svg class="wf-chart" viewBox="0 0 ${WF.w} ${WF.h}" role="img"
+       aria-label="Waterfall from wallet balance to what is safe to spend">
+       <line class="wf-base" x1="${WF.left}" y1="${y(0)}" x2="${WF.w - WF.right}" y2="${y(0)}" />
+       ${connectors}${rects}
+     </svg>`,
+    'Your cash, less what is already spoken for, is what is safe to spend.'
+  );
+}
+
+/**
+ * Am I ahead or behind? The daily allowance is a rate; this is the position.
+ * Cumulative spend this period against an even burn of the whole spendable
+ * envelope — under the dashed line is on track, over it is spending too fast.
+ * The actual line is green while under pace and red once over, but the reading
+ * is the gap between the two lines, not the colour.
+ */
+function paceCard(rows, b, now) {
+  if (b.anchoredTo === 'none') return '';
+  const budgetMinor = b.spendMinor + Math.max(0, b.safeToSpendMinor);
+  if (budgetMinor <= 0) return '';
+
+  const pace = spendPace(rows, {
+    start: b.since,
+    end: b.nextIncomeAt,
+    now,
+    budgetMinor,
+  });
+  const maxMinor = ceilNice(Math.max(1, pace.budgetMinor, pace.spentMinor));
+  const lay = linePoints(pace.cumulative, { slots: pace.totalDays + 1, maxMinor });
+
+  const grid = gridLines(maxMinor)
+    .map(
+      (g) => `<line class="ov-grid" x1="${FRAME.left}" y1="${g.y}" x2="${FRAME.w - FRAME.right}" y2="${g.y}" />
+        <text class="ov-tick" x="${FRAME.left - 4}" y="${g.y + 3}" text-anchor="end">${g.label}</text>`
+    )
+    .join('');
+
+  const ideal = `<line class="pace-ideal" x1="${lay.x(0)}" y1="${lay.y(0)}"
+    x2="${lay.x(pace.totalDays)}" y2="${lay.y(pace.budgetMinor)}" />`;
+
+  const over = pace.overMinor > 0;
+  const actual = lay.points.map((p) => `${p.x},${p.y}`).join(' ');
+  const last = lay.points.at(-1);
+  const dot = last
+    ? `<circle class="pace-dot ${over ? 'neg' : 'pos'}" cx="${last.x}" cy="${last.y}" r="3.5" />`
+    : '';
+
+  const foot =
+    pace.overMinor === 0
+      ? `${formatMinor(pace.spentMinor)} spent — exactly on pace.`
+      : over
+        ? `${formatMinor(pace.spentMinor)} spent — ${formatMinor(pace.overMinor)} ahead of an even pace.`
+        : `${formatMinor(pace.spentMinor)} spent — ${formatMinor(-pace.overMinor)} below an even pace.`;
+
+  return card(
+    'Spending pace',
+    `<svg class="ov-chart" viewBox="0 0 ${FRAME.w} ${FRAME.h}" role="img"
+       aria-label="Cumulative spending against an even pace">
+       ${grid}${ideal}
+       <polyline class="pace-line ${over ? 'neg' : 'pos'}" points="${actual}" />
+       ${dot}
+     </svg>
+     <div class="ov-legend">
+       <span><i class="sw pace-sw-ideal"></i>Even pace</span>
+       <span><i class="sw ${over ? 'pace-sw-neg' : 'pace-sw-pos'}"></i>You, so far</span>
+     </div>
+     <p class="hint ov-foot">${foot} Day ${pace.elapsed} of ${pace.totalDays}.</p>`,
+    'Under the dashed line is on track; over it is spending faster than the month allows.'
   );
 }
 

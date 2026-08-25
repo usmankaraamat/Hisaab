@@ -22,12 +22,15 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
-import { budgetSummary, categoryTotals, calendarPeriod, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
+import { budgetSummary, categoryTotals, calendarPeriod, spendPace, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
-import { barLayout, gridLines, ceilNice, shortMinor, FRAME } from '../src/lib/chart.js';
+import {
+  barLayout, gridLines, ceilNice, shortMinor, FRAME,
+  bridgeLayout, divergingLayout, sparkPoints, linePoints,
+} from '../src/lib/chart.js';
 import {
   monthlySeries, weeklySeries, dailySeries, weeksIn, savingsPot, savingsRate,
-  projectMonth, categoryDelta, suggestedTarget, goalProgress, isTracked,
+  projectMonth, categoryDelta, categorySeries, suggestedTarget, goalProgress, isTracked, isSpend,
 } from '../src/lib/trends.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
@@ -663,6 +666,86 @@ check('and lands close above the value',
 check('axis labels stay short', [shortMinor(1200000), shortMinor(45000), shortMinor(150000000)],
   ['12k', '450', '1500k']);
 check('the baseline is the zero line', gridLines(100000)[0].y, barLayout(bucketsOf([1, 1])).base);
+
+console.log('\n--- waterfall, diverging bars, sparklines, pace ---');
+
+/* A waterfall is only honest if every floating bar begins exactly where the
+ * last one ended and the final bar equals the running total. */
+const wf = bridgeLayout({
+  startMinor: 1000000,
+  steps: [{ label: 'Bills', minor: -200000 }, { label: 'Save', minor: -100000 }, { label: 'Owe', minor: -50000 }],
+});
+check('a waterfall has a bar per step plus two totals', wf.bars.length, 5);
+check('and its final total is the running sum', wf.endMinor, 650000);
+check('the closing bar carries that total', wf.bars.at(-1).valueMinor, 650000);
+check('each floating step begins where the last ended',
+  wf.bars.slice(1, -1).every((b, i) => b.fromMinor === wf.levels[i]), true);
+const wfNeg = bridgeLayout({ startMinor: 100000, steps: [{ label: 'Owe', minor: -160000 }] });
+check('a period over budget drops the scale below zero', wfNeg.min < 0, true);
+check('and its closing total is negative', wfNeg.endMinor, -60000);
+
+/* Diverging: the sign is the side. Positive starts at the centre and runs
+ * right; negative ends at the centre and runs left; the scale is symmetric. */
+const dv = divergingLayout(
+  [{ minor: 4000 }, { minor: -2000 }, { minor: 0 }],
+  { width: 300, labelW: 80, padRight: 20, rowH: 20, gap: 4 }
+);
+check('a positive diverging bar starts at the centre', Math.round(dv.rows[0].x), Math.round(dv.cx));
+check('a negative one ends at the centre',
+  Math.round(dv.rows[1].x + dv.rows[1].w), Math.round(dv.cx));
+check('twice the magnitude is twice the bar', dv.rows[0].w, dv.rows[1].w * 2);
+check('a zero balance draws no bar', dv.rows[2].w, 0);
+
+/* A sparkline baselines at zero, so a steady run is not amplified into drama. */
+const spk = sparkPoints([0, 100, 200], { w: 20, h: 10, pad: 0 });
+check('a sparkline has a point per value', spk.length, 3);
+check('its zero sits on the floor', spk[0].y, 10);
+check('its peak sits on the ceiling', spk[2].y, 0);
+
+/* Two lines on one day-based x-axis, so actual and ideal are comparable. */
+const lp = linePoints([0, 500, 900], { slots: 5, maxMinor: 1000 });
+check('a line spans its slots, not its samples', Math.round(lp.x(4)), FRAME.w - FRAME.right);
+check('and maps value to height on a shared scale', Math.round(lp.y(1000)), FRAME.top);
+
+/* The burn-down cumulates only real spend, and reads ahead/behind an even pace. */
+const paceRows = [
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries', occurred_at: '2026-08-03T10:00:00.000Z' }),
+  spend({ raw_name: 'Investment', amount_minor: 5000000, category: 'Savings', occurred_at: '2026-08-04T10:00:00.000Z' }),
+  spend({ raw_name: 'lunch', amount_minor: 40000, category: 'Eating Out', occurred_at: '2026-08-06T10:00:00.000Z' }),
+];
+const pace = spendPace(paceRows, {
+  start: '2026-08-03T00:00:00.000Z', end: '2026-09-01T00:00:00.000Z',
+  now: asOfAug8, budgetMinor: 2900000,
+});
+check('the burn-down cumulates spend only, not savings', pace.spentMinor, 140000);
+check('its cumulative ends at the total spent', pace.cumulative.at(-1), 140000);
+check('and it reports being well under an even pace', pace.overMinor < 0, true);
+
+console.log('\n--- a reconciliation touches no time series ---');
+const reconMonth = monthlySeries([
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries', occurred_at: '2026-08-05T10:00:00.000Z' }),
+  spend({ raw_name: 'Reconcile cash', amount_minor: 5000, category: RECONCILE, occurred_at: '2026-08-06T10:00:00.000Z' }),
+  spend({ raw_name: 'Reconcile cash', direction: 'in', amount_minor: 8000, category: RECONCILE, occurred_at: '2026-08-07T10:00:00.000Z' }),
+]);
+check('a reconciliation charge is not spend in the monthly series', reconMonth[0].spendMinor, 100000);
+check('and a reconciliation credit is not income', reconMonth[0].incomeMinor, 0);
+check('isSpend excludes a reconciliation row',
+  isSpend({ direction: 'out', category: RECONCILE }), false);
+
+/* One category's line across the months, keyed like categoryDelta. */
+const csMonths = monthlySeries([
+  spend({ raw_name: 'a', amount_minor: 1000, category: 'Groceries', occurred_at: '2026-07-10T10:00:00.000Z' }),
+  spend({ raw_name: 'b', amount_minor: 3000, category: 'Groceries', occurred_at: '2026-08-10T10:00:00.000Z' }),
+  spend({ raw_name: 'c', amount_minor: 9000, category: 'Eating Out', occurred_at: '2026-08-11T10:00:00.000Z' }),
+]);
+check('a category series lines up one value per month',
+  categorySeries(
+    [
+      spend({ raw_name: 'a', amount_minor: 1000, category: 'Groceries', occurred_at: '2026-07-10T10:00:00.000Z' }),
+      spend({ raw_name: 'b', amount_minor: 3000, category: 'Groceries', occurred_at: '2026-08-10T10:00:00.000Z' }),
+    ],
+    'Groceries', csMonths
+  ), [1000, 3000]);
 
 console.log('\n--- display names ---');
 check('a tidy name replaces the raw text',
