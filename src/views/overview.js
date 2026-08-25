@@ -33,10 +33,11 @@ import {
   savingsRate,
   projectMonth,
   categoryDelta,
+  categorySeries,
   suggestedTarget,
   goalProgress,
 } from '../lib/trends.js';
-import { barLayout, gridLines, FRAME } from '../lib/chart.js';
+import { barLayout, gridLines, sparkPoints, ceilNice, shortMinor, FRAME } from '../lib/chart.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { go } from '../nav.js';
@@ -86,6 +87,7 @@ export async function renderOverview(root, params) {
   host.innerHTML = [
     potCard(pot, goal, months, now),
     chartCard(buckets, level, crumbs, month, now),
+    level === 'month' ? cashflowCard(months) : '',
     level === 'month' ? '' : monthDetail(rows, months, month, now),
     level === 'month' ? targetCard(months, now) : '',
   ].join('');
@@ -235,6 +237,77 @@ function shortLabel(b, level) {
   return String(b.day);
 }
 
+/* --------------------------------------------------------------- cashflow */
+
+/**
+ * Money in against money out, per month, as paired bars on one shared rupee
+ * scale. The main chart answers "where did it go"; this answers the question a
+ * spend total alone cannot — did the month end ahead or behind. When the green
+ * bar clears the blue one you lived within your means; when it does not, you did
+ * not. Two series, so a legend is always present and each bar is nameable in the
+ * caption; savings *rate* is a percentage and stays its own figure in the month
+ * detail rather than a forbidden second axis here.
+ */
+const CF = { w: 340, h: 150, top: 12, right: 6, bottom: 22, left: 30 };
+
+function cashflowCard(months) {
+  const data = months.slice(-12);
+  if (!data.some((m) => m.incomeMinor > 0)) return '';
+
+  const plotW = CF.w - CF.left - CF.right;
+  const plotH = CF.h - CF.top - CF.bottom;
+  const base = CF.top + plotH;
+  const max = ceilNice(Math.max(1, ...data.flatMap((m) => [m.incomeMinor, m.spendMinor])));
+  const y = (v) => base - (Math.max(0, v) / max) * plotH;
+  const band = plotW / Math.max(1, data.length);
+  const bw = Math.min(11, Math.max(3, band / 2 - 2));
+
+  const grid = gridLines(max)
+    .map(
+      (g) => `<line class="ov-grid" x1="${CF.left}" y1="${g.y}" x2="${CF.w - CF.right}" y2="${g.y}" />
+        <text class="ov-tick" x="${CF.left - 4}" y="${g.y + 3}" text-anchor="end">${g.label}</text>`
+    )
+    .join('');
+
+  const bars = data
+    .map((m, i) => {
+      const cx = CF.left + band * i + band / 2;
+      const inY = y(m.incomeMinor);
+      const outY = y(m.spendMinor);
+      const ref = m.reference ? ' ref' : '';
+      return `<g class="cf-band${ref}">
+        <rect class="cf-bar in" x="${cx - bw - 1}" y="${inY}" width="${bw}" height="${base - inY}" rx="2" />
+        <rect class="cf-bar out" x="${cx + 1}" y="${outY}" width="${bw}" height="${base - outY}" rx="2" />
+        <text class="ov-xlabel" x="${cx}" y="${CF.h - 6}" text-anchor="middle">${escapeHtml(
+          m.label.split(' ')[0]
+        )}</text>
+      </g>`;
+    })
+    .join('');
+
+  const last = data.at(-1);
+  const net = last.incomeMinor - last.spendMinor - last.savedMinor;
+  const netNote = last.incomeMinor
+    ? ` ${last.label.split(' ')[0]}: ${
+        net >= 0 ? `${formatMinor(net)} left over` : `${formatMinor(-net)} short`
+      } after spending and saving.`
+    : '';
+
+  return card(
+    'Money in and out',
+    `<svg class="ov-chart" viewBox="0 0 ${CF.w} ${CF.h}" role="img"
+       aria-label="Income against spending by month">
+       ${grid}${bars}
+     </svg>
+     <div class="ov-legend">
+       <span><i class="sw cf-in"></i>In</span>
+       <span><i class="sw cf-out"></i>Out</span>
+       ${data.some((m) => m.reference) ? '<span><i class="sw ref"></i>Imported</span>' : ''}
+     </div>`,
+    `Income against spending, per month.${netNote}`
+  );
+}
+
 function drillTarget(b, level, month, i) {
   if (level === 'month') return { m: b.key };
   if (level === 'week') return { m: month.key, w: String(i + 1) };
@@ -324,25 +397,55 @@ function monthDetail(rows, months, month, now) {
     ? card(
         `Against ${MONTH_SHORT.format(new Date(previous.year, previous.month, 1))}`,
         deltas.length
-          ? deltas
-              .map((d) =>
-                row(
-                  `${escapeHtml(d.category)}<small>${formatMinor(d.wasMinor)} → ${formatMinor(
-                    d.nowMinor
-                  )}</small>`,
-                  `${d.changeMinor > 0 ? '+' : '−'}${formatMinor(Math.abs(d.changeMinor))}${
-                    d.changePct === null ? '' : `<small>${d.changePct > 0 ? '+' : ''}${d.changePct}%</small>`
-                  }`,
-                  d.changeMinor > 0 ? 'up' : 'down'
-                )
-              )
-              .join('')
+          ? moverBars(rows, deltas, months)
           : '<p class="empty">No category moved.</p>',
-        'Biggest movers first, by amount rather than percentage.'
+        'Bars run right for more, left for less — length is the change in rupees. The trailing line is that category over recent months.'
       )
     : '';
 
   return split + change;
+}
+
+/**
+ * Category movers as diverging bars: right for more than last month, left for
+ * less. The side and the signed number carry the direction, so the reading does
+ * not depend on the red/green (which a colour-vision check will not separate on
+ * hue alone). Each row also carries a sparkline of that category over recent
+ * months, so a jump reads as a spike or a new level rather than a bare delta.
+ */
+function moverBars(rows, deltas, months) {
+  const max = Math.max(1, ...deltas.map((d) => Math.abs(d.changeMinor)));
+  const recent = months.slice(-6);
+  return `<div class="mv-list">${deltas
+    .map((d) => {
+      const pct = Math.round((Math.abs(d.changeMinor) / max) * 50); // half-track
+      const up = d.changeMinor > 0;
+      const series = categorySeries(rows, d.category, recent);
+      const pts = sparkPoints(series, { w: 60, h: 18 });
+      const spark = series.some((v) => v > 0)
+        ? `<svg class="spark mv-spark" width="60" height="18" viewBox="0 0 60 18" aria-hidden="true">
+             <polyline class="spark-line" points="${pts.map((p) => `${p.x},${p.y}`).join(' ')}" />
+           </svg>`
+        : '';
+      return `<div class="mv-row">
+        <div class="mv-head">
+          <span class="mv-name">${escapeHtml(d.category)}</span>
+          <span class="mv-num ${up ? 'up' : 'down'}">${up ? '+' : '−'}${formatMinor(
+            Math.abs(d.changeMinor)
+          )}${d.changePct === null ? '' : ` · ${d.changePct > 0 ? '+' : ''}${d.changePct}%`}</span>
+        </div>
+        <div class="mv-track">
+          <span class="mv-mid"></span>
+          <span class="mv-fill ${up ? 'neg' : 'pos'}" style="${
+            up ? 'left:50%' : `right:50%`
+          };width:${pct}%"></span>
+        </div>
+        <div class="mv-foot">${spark}<small>${formatMinor(d.wasMinor)} → ${formatMinor(
+          d.nowMinor
+        )}</small></div>
+      </div>`;
+    })
+    .join('')}</div>`;
 }
 
 /* ------------------------------------------------------ suggested target */

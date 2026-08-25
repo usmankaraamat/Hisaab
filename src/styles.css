@@ -10,6 +10,16 @@
   --danger: #dc2626;
   --radius: 14px;
   --tabbar: 60px;
+
+  /* Chart palette. Validated with the dataviz skill's checker against the card
+   * surface in both themes. The diverging pair (pos/neg) is the finance-standard
+   * green/red, which fails a colour-vision check on hue alone — so every chart
+   * that uses it carries the sign by bar direction and a signed label, never by
+   * colour. --c-info (blue) is the CVD-safe second series for income-vs-spend. */
+  --c-pos: #16a34a;   /* under budget · income · money coming back */
+  --c-neg: #dc2626;   /* over budget · a rise · a deficit */
+  --c-info: #2a78d6;  /* second series (spend, against income) */
+  --c-grid: var(--line);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +33,12 @@
     --out: #e8eaed;
     --in: #4ade80;
     --danger: #f87171;
+
+    /* Dark chart steps: taken into the dark lightness band the validator
+     * enforces, not an automatic flip of the light values. */
+    --c-pos: #199e70;
+    --c-neg: #e05656;
+    --c-info: #3987e5;
   }
 }
 
@@ -224,6 +240,24 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 /* ---------- lists ---------- */
 
 .recent-head { margin-top: 26px; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+
+/* Today / this week / this month spend, on the capture screen. */
+.spend-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.spend-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.st-label { color: var(--muted); font-size: .74rem; }
+.st-amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.02rem; }
+.spend-tile .spark { margin: 3px 0 1px; width: 100%; height: 24px; }
+.st-delta { font-size: .7rem; font-variant-numeric: tabular-nums; }
+.st-up { color: var(--danger); }
+.st-down { color: var(--accent); }
 
 ul.recent, .day ul { list-style: none; margin: 0; padding: 0; }
 
@@ -576,6 +610,22 @@ pre {
 .h-filter-row { display: flex; gap: 8px; }
 .h-filter-row select { flex: 1; min-width: 0; }
 
+/* Start/end date pickers, used by History and the Spending breakdown. */
+.date-range { display: flex; gap: 8px; }
+.date-range label.stack { flex: 1; min-width: 0; margin: 0; }
+.date-range input[type="date"] {
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: .86rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.card .date-range { margin: 6px 0 14px; }
+
 .h-filter input,
 .h-filter select {
   padding: 9px 11px;
@@ -803,6 +853,65 @@ label.stack input {
 .ov-legend .sw.saved { background: var(--ov-save); }
 .ov-legend .sw.ghost { background: var(--ov-spend); opacity: .28; }
 .ov-legend .sw.ref { background: var(--muted); opacity: .4; }
+
+/* Waterfall: how "safe" is worked out. */
+.wf-chart { display: block; width: 100%; height: auto; margin: 2px 0 4px; overflow: visible; }
+.wf-base { stroke: var(--line); stroke-width: 1; }
+.wf-link { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
+.wf-bar.start { fill: var(--c-info); }
+.wf-bar.step { fill: var(--muted); opacity: .5; }
+.wf-bar.end.pos { fill: var(--c-pos); }
+.wf-bar.end.neg { fill: var(--c-neg); }
+.wf-val { fill: var(--text); font-size: 8px; font-weight: 600; font-family: inherit; }
+.wf-lab { fill: var(--muted); font-size: 8px; font-family: inherit; }
+
+/* Burn-down pace. */
+.pace-ideal { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: .7; fill: none; }
+.pace-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.pace-line.pos { stroke: var(--c-pos); }
+.pace-line.neg { stroke: var(--c-neg); }
+.pace-dot.pos { fill: var(--c-pos); }
+.pace-dot.neg { fill: var(--c-neg); }
+.ov-legend .sw.pace-sw-ideal { background: var(--muted); opacity: .7; }
+.ov-legend .sw.pace-sw-pos { background: var(--c-pos); }
+.ov-legend .sw.pace-sw-neg { background: var(--c-neg); }
+
+/* Diverging bars: category movers, per-person balances. Direction carries the
+ * sign; colour only reinforces it. */
+.dv-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.dv-mid { stroke: var(--line); stroke-width: 1; }
+.dv-bar.pos { fill: var(--c-pos); }
+.dv-bar.neg { fill: var(--c-neg); }
+.dv-label { fill: var(--text); font-size: 9px; font-family: inherit; }
+.dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
+
+/* Sparklines that sit beside a number. */
+.spark { display: block; overflow: visible; }
+.spark-line { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.spark-dot { fill: var(--c-info); }
+
+/* Cashflow: income against spending. */
+.cf-bar.in { fill: var(--c-pos); }
+.cf-bar.out { fill: var(--c-info); }
+.cf-band.ref .cf-bar { opacity: .4; }
+.ov-legend .sw.cf-in { background: var(--c-pos); }
+.ov-legend .sw.cf-out { background: var(--c-info); }
+
+/* Category movers: diverging HTML bars off a centre line, with a sparkline. */
+.mv-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.mv-head { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
+.mv-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mv-num.up { color: var(--danger); }
+.mv-num.down { color: var(--accent); }
+.mv-track { position: relative; height: 8px; margin: 5px 0 3px; background: var(--surface); border-radius: 4px; }
+.mv-mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--line); }
+.mv-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.mv-fill.pos { background: var(--c-pos); }
+.mv-fill.neg { background: var(--c-neg); }
+.mv-foot { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .74rem; }
+.mv-spark { flex: none; width: 60px; height: 18px; }
 
 .ov-crumbs {
   display: flex;

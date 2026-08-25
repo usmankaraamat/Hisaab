@@ -8,6 +8,7 @@
 
 import { allTransactions, settleCounterparty, settleTransaction } from '../db/local.js';
 import { balances, ledgerTotals } from '../lib/ledger.js';
+import { divergingLayout } from '../lib/chart.js';
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { ledgerLabel } from '../lib/label.js';
@@ -63,6 +64,7 @@ async function paint(body) {
         <dt>You owe</dt><dd class="out">${formatMinor(totals.iOweMinor)}</dd>
       </dl>
     </div>
+    ${open.length >= 2 ? balancesChart(open) : ''}
     <div id="people"></div>`;
 
   const list = body.querySelector('#people');
@@ -72,6 +74,52 @@ async function paint(body) {
     list.insertAdjacentHTML('beforeend', `<h3 class="group-head">Settled (${square.length})</h3>`);
     for (const person of square) list.append(card(person, body));
   }
+}
+
+/**
+ * Everyone with an open balance, as diverging bars off a centre line: right and
+ * green means they owe you, left and red means you owe them, and the length is
+ * how much. It turns a scroll of names into one picture of where the exposure
+ * is and which way it points. The side and the signed value carry the direction
+ * — red/green alone would not survive a colour-vision check — and the numbers
+ * still live in the list below, so this is the map, not the record.
+ */
+const DVW = 340;
+
+function balancesChart(open) {
+  const items = open.slice(0, 8); // balances() is already sorted by |net| desc.
+  const lay = divergingLayout(items, {
+    width: DVW,
+    rowH: 22,
+    gap: 8,
+    labelW: 84,
+    padRight: 64,
+    value: (p) => p.netMinor,
+  });
+  const rows = lay.rows
+    .map((r) => {
+      const mid = r.y + r.h / 2 + 3;
+      const sign = r.positive ? '+' : '−';
+      return `
+        <text class="dv-label" x="0" y="${mid}">${escapeHtml(r.item.name)}</text>
+        <rect class="dv-bar ${r.positive ? 'pos' : 'neg'}" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="2" />
+        <text class="dv-value" x="${DVW - 4}" y="${mid}" text-anchor="end">${sign}${formatMinor(
+          Math.abs(r.value)
+        )}</text>`;
+    })
+    .join('');
+
+  return `<div class="card">
+    <h3>Where it stands</h3>
+    <svg class="dv-chart" viewBox="0 0 ${DVW} ${lay.height}" role="img"
+      aria-label="Net balance for each person">
+      <line class="dv-mid" x1="${lay.cx}" y1="0" x2="${lay.cx}" y2="${lay.height}" />
+      ${rows}
+    </svg>
+    <p class="hint">Right of the line they owe you; left, you owe them.${
+      open.length > items.length ? ` Top ${items.length} shown.` : ''
+    }</p>
+  </div>`;
 }
 
 function card(person, body) {

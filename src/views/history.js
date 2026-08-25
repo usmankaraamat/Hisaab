@@ -18,7 +18,13 @@ import { formatTxnAmount, formatMinor, toMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { txnLabel, hasRewrite } from '../lib/label.js';
 import { personKey } from '../capture/split.js';
-import { isSharedSpend, isWrittenOffShare, isOutstandingLoan, ON_OTHERS } from '../lib/budget.js';
+import {
+  isSharedSpend,
+  isWrittenOffShare,
+  isOutstandingLoan,
+  ON_OTHERS,
+  calendarPeriod,
+} from '../lib/budget.js';
 import { invalidate } from '../capture/predict.js';
 import { syncNow } from '../db/sync.js';
 
@@ -28,9 +34,18 @@ const DAY = new Intl.DateTimeFormat('en-GB', {
   month: 'short',
 });
 
-const filter = { text: '', category: '', person: '' };
+const filter = { text: '', category: '', person: '', from: null, to: null };
+let datesInitialised = false;
 
 export async function renderHistory(root, params) {
+  // Default to the current period — a month — the first time this screen opens.
+  // After that the user's own choice of dates is kept between visits.
+  if (!datesInitialised) {
+    filter.from = toDateInput(calendarPeriod().periodStart);
+    filter.to = '';
+    datesInitialised = true;
+  }
+
   // A link from another tab wins over whatever was left set here.
   if (params?.has('cat')) {
     filter.category = params.get('cat') || '';
@@ -41,6 +56,12 @@ export async function renderHistory(root, params) {
     filter.person = params.get('person') || '';
     filter.text = '';
     filter.category = '';
+  }
+  // A drill-down from Spending carries the same window its bar was counted over,
+  // so the entries can never total more than the figure that was tapped.
+  if (params?.has('from') || params?.has('to')) {
+    filter.from = params.get('from') || '';
+    filter.to = params.get('to') || '';
   }
 
   root.innerHTML = `
@@ -53,6 +74,14 @@ export async function renderHistory(root, params) {
           <select id="f-cat" aria-label="Filter by category"></select>
           <select id="f-person" aria-label="Filter by person"></select>
         </div>
+        <div class="h-filter-row date-range">
+          <label class="stack">From
+            <input id="f-from" type="date" aria-label="From date" value="${escapeHtml(filter.from || '')}" />
+          </label>
+          <label class="stack">To
+            <input id="f-to" type="date" aria-label="To date" value="${escapeHtml(filter.to || '')}" />
+          </label>
+        </div>
       </div>
       <div id="history-body"><p class="empty">Loading…</p></div>
     </section>
@@ -62,6 +91,17 @@ export async function renderHistory(root, params) {
   const text = root.querySelector('#f-text');
   const cat = root.querySelector('#f-cat');
   const person = root.querySelector('#f-person');
+  const from = root.querySelector('#f-from');
+  const to = root.querySelector('#f-to');
+
+  from.addEventListener('change', () => {
+    filter.from = from.value;
+    paint(body, { cat, person });
+  });
+  to.addEventListener('change', () => {
+    filter.to = to.value;
+    paint(body, { cat, person });
+  });
 
   let debounce = null;
   text.addEventListener('input', () => {
@@ -81,6 +121,14 @@ export async function renderHistory(root, params) {
   });
 
   await paint(body, { cat, person });
+}
+
+/** ISO instant -> the "YYYY-MM-DD" a date input expects, in local time. */
+function toDateInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /** ISO instant -> the "YYYY-MM-DDTHH:mm" a datetime-local input expects, in local time. */
@@ -115,6 +163,11 @@ function matches(r) {
   // By key, not by string: the Spending card links in with whichever spelling
   // it saw first, and "sister" must not filter out "Sister".
   if (filter.person && personKey(r.counterparty_name) !== personKey(filter.person)) return false;
+  if (filter.from || filter.to) {
+    const at = new Date(r.occurred_at).getTime();
+    if (filter.from && at < new Date(`${filter.from}T00:00:00`).getTime()) return false;
+    if (filter.to && at > new Date(`${filter.to}T23:59:59.999`).getTime()) return false;
+  }
   if (filter.text) {
     const needle = filter.text.toLowerCase();
     const hay = `${r.raw_name} ${r.display_name ?? ''} ${r.category ?? ''} ${r.counterparty_name ?? ''}`;
@@ -159,7 +212,7 @@ async function paint(body, controls) {
   }
 
   const shown = rows.filter(matches);
-  const filtering = Boolean(filter.text || filter.category || filter.person);
+  const filtering = Boolean(filter.text || filter.category || filter.person || filter.from || filter.to);
 
   if (!rows.length) {
     body.innerHTML = '<p class="empty">No transactions yet.</p>';

@@ -18,7 +18,7 @@
  * Pure functions over rows, so they run offline and are checked in verify.mjs.
  */
 
-import { isWrittenOffShare, isOutstandingLoan, NON_SPEND } from './budget.js';
+import { isWrittenOffShare, isOutstandingLoan, NON_SPEND, RECONCILE } from './budget.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -37,6 +37,8 @@ export function isTracked(row) {
 export function isSpend(row) {
   if (row.direction !== 'out') return false;
   if (NON_SPEND.has(row.category)) return false;
+  // A reconciliation correction is neither earned nor bought; see budget.js.
+  if (row.category === RECONCILE) return false;
   if (row.ledger_effect === 'borrowed') return false;
   if (isOutstandingLoan(row)) return false;
   return true;
@@ -101,6 +103,8 @@ function into(t, row) {
   if (row.direction === 'in') {
     // Redeeming savings is not income; it undoes a deposit.
     if (row.category === 'Savings') t.savedMinor -= row.amount_minor;
+    // A reconciliation credit is a correction to the balance, not income.
+    else if (row.category === RECONCILE) return;
     else if (!row.ledger_effect) t.incomeMinor += row.amount_minor;
     return;
   }
@@ -305,6 +309,25 @@ export function categoryDelta(rows, current, previous) {
     })
     .filter((d) => d.changeMinor !== 0)
     .sort((a, b) => Math.abs(b.changeMinor) - Math.abs(a.changeMinor));
+}
+
+/**
+ * One category's tracked spend across the given month buckets, oldest first —
+ * for a sparkline that answers whether a mover is a spike or the new normal.
+ * Keyed the same way as `categoryDelta`, so "On other people" lines up.
+ */
+export function categorySeries(rows, category, months) {
+  const idx = new Map(months.map((m, i) => [`${m.year}-${pad(m.month + 1)}`, i]));
+  const out = new Array(months.length).fill(0);
+  for (const r of rows) {
+    if (r.deleted || !isTracked(r) || !isSpend(r)) continue;
+    const key = isWrittenOffShare(r) ? 'On other people' : r.category || 'Uncategorised';
+    if (key !== category) continue;
+    const { y, m } = parts(r.occurred_at);
+    const i = idx.get(`${y}-${pad(m + 1)}`);
+    if (i !== undefined) out[i] += r.amount_minor;
+  }
+  return out;
 }
 
 /**
