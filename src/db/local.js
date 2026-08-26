@@ -504,6 +504,7 @@ export async function addPending(input) {
     amountMinor: Math.abs(Math.trunc(input.amountMinor || 0)),
     direction: input.direction === 'in' ? 'in' : 'out',
     counterparty: input.counterparty ?? null,
+    category: input.category ?? null,
     source: input.source ?? null,
     ref: input.ref ?? null,
     occurred_at: input.occurred_at || input.occurredAt || now,

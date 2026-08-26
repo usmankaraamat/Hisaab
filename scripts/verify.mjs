@@ -36,6 +36,7 @@ import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import { parseNotification } from '../src/capture/notif.js';
 import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
+import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
 import {
   rideSurge,
   priceIndex,
@@ -365,6 +366,23 @@ check('the first matching rule wins',
   matchRule([{ match: 'a', category: 'X' }, { match: 'app', category: 'Y' }], 'apple')?.category, 'X');
 check('a rule contributes only a category', ruleFields(ruleset[0]), { category: 'Rides' });
 check('a suggested match is the first word', suggestMatch('Indrive Home-Office'), 'indrive');
+
+console.log('\n--- recurring schedules ---');
+check('a monthly schedule steps by a month',
+  nextDueAfter('2026-01-15T09:00:00.000Z', 'monthly').slice(0, 10), '2026-02-15');
+check('a weekly one steps by seven days',
+  nextDueAfter('2026-01-15T09:00:00.000Z', 'weekly').slice(0, 10), '2026-01-22');
+const scheds = [
+  { id: 'rent', name: 'Rent', amountMinor: 2500000, direction: 'out', cadence: 'monthly', nextDue: '2026-08-01T09:00:00.000Z' },
+  { id: 'gym', name: 'Gym', amountMinor: 300000, direction: 'out', cadence: 'monthly', nextDue: '2026-09-20T09:00:00.000Z' },
+];
+check('only a due schedule surfaces',
+  dueSchedules(scheds, asOfAug8).map((s) => s.id), ['rent']);
+// Dormant since 1 Aug: advancing past 8 Aug lands on 1 Sep, not a backlog of one per month.
+check('a due schedule advances to its next future occurrence',
+  advanceSchedule(scheds[0], asOfAug8).nextDue.slice(0, 10), '2026-09-01');
+check('an occurrence key is stable per due date',
+  occurrenceKey(scheds[0]), 'sched:rent:2026-08-01');
 
 console.log('\n--- per-category budgets ---');
 const budgetRows = [

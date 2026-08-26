@@ -18,9 +18,11 @@ import {
   addPending,
   deletePending,
   getMeta,
+  setMeta,
 } from '../db/local.js';
 import { parseNotification } from './notif.js';
 import { matchRule, ruleFields } from '../lib/rules.js';
+import { dueSchedules, advanceSchedule, occurrenceKey } from '../lib/schedule.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
 import { syncNow } from '../db/sync.js';
@@ -462,7 +464,35 @@ export async function renderAdd(root) {
    * say what the money was for, and to split one payment across several things
    * when that is what it was.
    */
+  /* Surface any recurring charge that has come due into the inbox, then advance
+   * it. Idempotent: the occurrence key means running this on every refresh adds
+   * each due charge exactly once. */
+  async function materializeDue() {
+    const schedules = await getMeta('schedules', []);
+    const due = dueSchedules(schedules, new Date());
+    if (!due.length) return;
+    for (const s of due) {
+      await addPending({
+        amountMinor: s.amountMinor,
+        direction: s.direction,
+        counterparty: s.name,
+        category: s.category || null,
+        source: 'Recurring',
+        kind: 'recurring',
+        source_key: occurrenceKey(s),
+        occurred_at: s.nextDue,
+        raw: `${s.name} — recurring ${s.cadence}`,
+      });
+    }
+    const now = new Date();
+    const advanced = schedules.map((s) =>
+      due.some((d) => d.id === s.id) ? advanceSchedule(s, now) : s
+    );
+    await setMeta('schedules', advanced);
+  }
+
   async function refreshPending() {
+    await materializeDue();
     const items = await listPending();
     inboxList.innerHTML = '';
     if (!items.length) {
@@ -483,12 +513,13 @@ export async function renderAdd(root) {
     const li = document.createElement('li');
     li.className = 'inbox-row';
     const bits = [p.source || 'payment', p.counterparty].filter(Boolean).join(' · ');
+    const tag = p.kind === 'recurring' ? '<span class="inbox-tag">due</span>' : '';
     li.innerHTML = `
       <button type="button" class="inbox-open">
         <span class="inbox-amt ${p.direction}">${p.direction === 'in' ? '+' : ''}${formatMinor(
           p.amountMinor
         )}</span>
-        <span class="inbox-meta"><b>${dirWord(p.direction)}</b> · ${escapeHtml(bits)}</span>
+        <span class="inbox-meta"><b>${dirWord(p.direction)}</b> · ${escapeHtml(bits)}${tag}</span>
       </button>`;
     li.querySelector('.inbox-open').addEventListener('click', () => {
       if (li.querySelector('form')) return;
@@ -589,14 +620,19 @@ export async function renderAdd(root) {
             { source_text: it.name }
           );
         } else {
-          await addTransaction(
-            applyRule({
-              raw_name: it.name,
-              amount_minor: it.amtMinor,
-              direction: p.direction,
-              occurred_at: p.occurred_at,
-            })
-          );
+          const input = applyRule({
+            raw_name: it.name,
+            amount_minor: it.amtMinor,
+            direction: p.direction,
+            occurred_at: p.occurred_at,
+          });
+          // A recurring capture carries its category; use it unless a rule
+          // already spoke.
+          if (!input.category && p.category) {
+            input.category = p.category;
+            input.enriched_at = new Date().toISOString();
+          }
+          await addTransaction(input);
         }
       }
 

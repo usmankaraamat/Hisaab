@@ -310,6 +310,10 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 .inbox-amt.in { color: var(--in); }
 .inbox-meta { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
 .inbox-meta b { color: var(--text); font-weight: 600; }
+.inbox-tag {
+  margin-left: 6px; padding: 1px 6px; font-size: .68rem; font-weight: 600;
+  color: var(--c-warn); border: 1px solid var(--c-warn); border-radius: 6px;
+}
 
 .resolve { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
 .resolve-raw {
@@ -971,6 +975,20 @@ label.stack input {
 .dv-label { fill: var(--text); font-size: 9px; font-family: inherit; }
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
+
+/* Recurring schedule inputs in Settings. */
+.sched-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.sched-add #sched-name { grid-column: 1 / -1; }
+.sched-add label.stack { margin: 0; grid-column: 1 / -1; }
+.sched-add input, .sched-add select {
+  width: 100%; padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.sched-add #add-sched {
+  grid-column: 1 / -1; font-weight: 600; color: var(--bg);
+  background: var(--accent); border-color: var(--accent); cursor: pointer;
+}
+.rule-row small { color: var(--muted); }
 
 /* Capture rules in Settings. */
 .rule-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }

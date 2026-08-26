@@ -81,6 +81,34 @@ export async function renderSettings(root) {
       </div>
 
       <div class="card">
+        <h3>Recurring &amp; reminders</h3>
+        <p class="hint">
+          Known charges — rent, a subscription, a salary. When one falls due it appears in
+          “To be resolved” on the home screen for a one-tap confirm.
+        </p>
+        <div id="sched-list"></div>
+        <div class="sched-add">
+          <input type="text" id="sched-name" placeholder="e.g. Rent" spellcheck="false" />
+          <input type="text" id="sched-amt" inputmode="decimal" placeholder="amount" />
+          <select id="sched-dir">
+            <option value="out">Spent</option>
+            <option value="in">Received</option>
+          </select>
+          <select id="sched-cat"></select>
+          <select id="sched-cadence">
+            <option value="monthly">Monthly</option>
+            <option value="fortnightly">Fortnightly</option>
+            <option value="weekly">Weekly</option>
+          </select>
+          <label class="stack">Next due
+            <input type="date" id="sched-due" />
+          </label>
+          <button type="button" id="add-sched">Add recurring</button>
+        </div>
+        <p id="sched-msg" class="hint"></p>
+      </div>
+
+      <div class="card">
         <h3>Capture rules</h3>
         <p class="hint">
           Anything you type containing the match text is filed under its category at capture,
@@ -316,6 +344,70 @@ export async function renderSettings(root) {
     budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
 
+  /* Recurring schedules. A plain array in meta. */
+  const schedList = root.querySelector('#sched-list');
+  const schedCat = root.querySelector('#sched-cat');
+  const schedMsg = root.querySelector('#sched-msg');
+  const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+  schedCat.innerHTML =
+    '<option value="">no category</option>' +
+    CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+
+  async function refreshSchedules() {
+    const schedules = await getMeta('schedules', []);
+    schedList.innerHTML = schedules.length
+      ? schedules
+          .map(
+            (s) => `<div class="rule-row">
+              <span class="rule-desc"><b>${escapeHtml(s.name)}</b> · ${formatMinor(s.amountMinor)} · ${
+                s.cadence
+              }<br><small>next ${DATE.format(new Date(s.nextDue))}${
+                s.category ? ` · ${escapeHtml(s.category)}` : ''
+              }</small></span>
+              <button type="button" class="link" data-del-sched="${s.id}">Remove</button>
+            </div>`
+          )
+          .join('')
+      : '<p class="hint">Nothing recurring yet.</p>';
+  }
+
+  schedList.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-del-sched]')?.dataset.delSched;
+    if (!id) return;
+    const schedules = await getMeta('schedules', []);
+    await setMeta('schedules', schedules.filter((s) => s.id !== id));
+    await refreshSchedules();
+  });
+
+  root.querySelector('#add-sched').addEventListener('click', async () => {
+    const name = root.querySelector('#sched-name').value.trim();
+    const amountMinor = toMinor(root.querySelector('#sched-amt').value);
+    const due = root.querySelector('#sched-due').value;
+    if (!name || amountMinor === null || amountMinor <= 0 || !due) {
+      schedMsg.className = 'warn';
+      schedMsg.textContent = 'Give it a name, an amount, and a first due date.';
+      return;
+    }
+    const schedules = await getMeta('schedules', []);
+    schedules.push({
+      id: newId(),
+      name,
+      amountMinor,
+      direction: root.querySelector('#sched-dir').value === 'in' ? 'in' : 'out',
+      category: schedCat.value || null,
+      cadence: root.querySelector('#sched-cadence').value,
+      // Fire in the morning of the due day rather than at midnight.
+      nextDue: new Date(`${due}T09:00:00`).toISOString(),
+    });
+    await setMeta('schedules', schedules);
+    root.querySelector('#sched-name').value = '';
+    root.querySelector('#sched-amt').value = '';
+    root.querySelector('#sched-due').value = '';
+    schedMsg.className = 'ok';
+    schedMsg.textContent = 'Added.';
+    await refreshSchedules();
+  });
+
   /* Capture rules. A plain array in meta: { id, match, category }. */
   const rulesList = root.querySelector('#rules-list');
   const ruleMatch = root.querySelector('#rule-match');
@@ -545,6 +637,7 @@ export async function renderSettings(root) {
     refreshRecon(),
     refreshCatBudgets(),
     refreshRules(),
+    refreshSchedules(),
   ]);
 }
 
