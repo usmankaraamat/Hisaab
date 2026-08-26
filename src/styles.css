@@ -259,6 +259,91 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 .st-up { color: var(--danger); }
 .st-down { color: var(--accent); }
 
+/* ---------- To be resolved (pending inbox) ---------- */
+
+.inbox { margin-top: 26px; }
+.inbox-head { display: flex; align-items: baseline; justify-content: space-between; }
+.inbox-head .recent-head { margin-top: 0; }
+
+.paste-box { margin: 8px 0 4px; }
+.paste-box textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: .9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  resize: vertical;
+}
+.paste-actions { display: flex; justify-content: flex-end; gap: 12px; align-items: center; margin-top: 6px; }
+.paste-msg { margin: 4px 0 0; }
+
+.inbox-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-empty { color: var(--muted); font-size: .82rem; padding: 4px 2px; }
+.inbox.empty .inbox-list { gap: 0; }
+
+.inbox-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.inbox-open {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.inbox-amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inbox-amt.out { color: var(--out); }
+.inbox-amt.in { color: var(--in); }
+.inbox-meta { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
+.inbox-meta b { color: var(--text); font-weight: 600; }
+
+.resolve { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+.resolve-raw {
+  margin: 10px 0 12px; padding: 8px 10px;
+  color: var(--muted); font-size: .76rem; line-height: 1.4;
+  background: var(--bg); border-radius: 8px;
+}
+.resolve-item { display: flex; gap: 8px; margin-bottom: 8px; }
+.resolve-item input[name="name"] { flex: 1; min-width: 0; }
+.resolve-item input[name="amt"] { width: 92px; text-align: right; }
+.resolve-item input {
+  padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.resolve-del {
+  flex: none; width: 34px; font-size: 1.1rem; line-height: 1;
+  color: var(--muted); background: none; border: 1px solid var(--line);
+  border-radius: 10px; cursor: pointer;
+}
+.resolve-add { padding: 2px 0; }
+.resolve-sum { margin: 6px 0 12px; }
+.resolve-sum.ok { color: var(--accent); }
+.resolve-actions { display: flex; justify-content: space-between; gap: 10px; }
+.resolve-actions button, .paste-actions button[type="submit"] {
+  padding: 9px 16px; font: inherit; font-size: .85rem;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.resolve-actions button[type="submit"], .paste-actions button[type="submit"] {
+  min-width: 96px; font-weight: 600; color: var(--bg);
+  background: var(--accent); border-color: var(--accent);
+}
+.resolve-actions button[type="submit"]:disabled { opacity: .5; }
+.resolve-actions button[data-act="dismiss"] { color: var(--danger); border-color: var(--danger); background: none; }
+
 ul.recent, .day ul { list-style: none; margin: 0; padding: 0; }
 
 ul.recent li, .day li {

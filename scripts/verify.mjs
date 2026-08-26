@@ -34,6 +34,7 @@ import {
 } from '../src/lib/trends.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
+import { parseNotification } from '../src/capture/notif.js';
 import {
   rideSurge,
   priceIndex,
@@ -77,6 +78,31 @@ check('leading digits in name', p("26 Number - Anser's Home 250"), [
 check('collapses whitespace', p('  Diet   Coke   100  '), ['Diet Coke', 10000, 'out']);
 check('empty input', p(''), ['', null, 'out']);
 check('amount only', p('300'), ['', 30000, 'out']);
+
+console.log('\n--- parseNotification (real wallet/bank formats) ---');
+const notif = (text, app) => {
+  const r = parseNotification(text, { appName: app });
+  return r && [r.amountMinor, r.direction, r.counterparty, r.source, r.occurredAt];
+};
+check('easypaisa received (fee line ignored)',
+  notif('Trx ID 53945346065. You have Received Rs. 50.00 from , Bank BAF in your Easypaisa Account. Fee for this transaction is Rs. 0.00.', 'easypaisa'),
+  [5000, 'in', 'Bank BAF', 'easypaisa', null]);
+check('Bank Alfalah sent, with date',
+  notif('Transaction Alert PKR 50.00 sent to MALIK USMAN KARAMAT TMB from your BAF A/C **9388 on 10-Aug-26 14:23:57 via FT Tx ID FT262220PL86PYMF', 'Alfa'),
+  [5000, 'out', 'MALIK USMAN KARAMAT', 'Bank Alfalah', '2026-08-10T14:23:57.000Z']);
+check('NayaPay sent (no amount decimals)',
+  notif("Off it goes Rs. 10 sent to Usman Karamat. Your wallet's seen better days.", 'NayaPay'),
+  [1000, 'out', 'Usman Karamat', 'NayaPay', null]);
+check('easypaisa Raast sent, ISO date',
+  notif('Dear MALIK USMAN KARAMAT, An amount of Rs. 675.0 has been successfully sent to AWAIS IQBAL in *******3787 via Raast Payment from your Easypaisa account *****19 on 2026-08-09 at 14:18:28.404552834. Trx ID 3945073211.', 'easypaisa'),
+  [67500, 'out', 'AWAIS IQBAL', 'easypaisa', '2026-08-09T14:18:28.000Z']);
+check('HBL SMS received, day-first date',
+  notif('PKR 10.00 received from MALIK USMAN KARAMAT IBAN in your HBL A/C via your Raast ID on 09/08/2026 14:24:13 TXN ID SM091424115A8429.', '14250'),
+  [1000, 'in', 'MALIK USMAN KARAMAT', 'HBL', '2026-08-09T14:24:13.000Z']);
+check('a message with no amount is not a capture',
+  parseNotification('Your OTP is 4821, do not share it with anyone.'), null);
+check('a fee-only line does not log zero',
+  parseNotification('Fee for this transaction is Rs. 0.00.'), null);
 
 const csvPath = join(here, '..', 'TransactionsLatest.csv');
 const hasCsv = existsSync(csvPath);

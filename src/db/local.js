@@ -21,7 +21,7 @@ import { personKey } from '../capture/split.js';
 const PREVIEW = import.meta.env?.DEV && typeof window !== 'undefined' && !!window.__rows;
 
 const DB_NAME = 'hisaab';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -49,6 +49,16 @@ export function openDB() {
 
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
+      }
+
+      // Captures waiting to be resolved: a payment notification, or a due
+      // recurring entry, that carries an amount but not yet a meaning. Kept
+      // apart from `transactions` because it is not spending until the user says
+      // what it was — and deliberately device-local, never synced, so a half-
+      // resolved inbox on one phone does not fan out to another.
+      if (!db.objectStoreNames.contains('pending')) {
+        const pending = db.createObjectStore('pending', { keyPath: 'id' });
+        pending.createIndex('created_at', 'created_at');
       }
     };
 
@@ -475,12 +485,71 @@ export async function setMeta(key, value) {
   await done;
 }
 
+/* ------------------------------------------------------------ pending inbox */
+
+/**
+ * Add a capture waiting to be resolved. `source_key` de-duplicates: a
+ * notification forwarded twice, or a recurring entry surfaced on two opens,
+ * lands once. Returns the stored record, or the existing one on a duplicate.
+ */
+export async function addPending(input) {
+  const db = await openDB();
+  const now = new Date().toISOString();
+  const rec = {
+    id: input.id || newId(),
+    amountMinor: Math.abs(Math.trunc(input.amountMinor || 0)),
+    direction: input.direction === 'in' ? 'in' : 'out',
+    counterparty: input.counterparty ?? null,
+    source: input.source ?? null,
+    ref: input.ref ?? null,
+    occurred_at: input.occurred_at || input.occurredAt || now,
+    raw: input.raw ?? null,
+    kind: input.kind || 'notification', // 'notification' | 'recurring'
+    source_key: input.source_key ?? null,
+    created_at: now,
+  };
+
+  const { t, done } = tx(db, ['pending'], 'readwrite');
+  const store = t.objectStore('pending');
+  if (rec.source_key) {
+    const all = await req(store.getAll());
+    const dupe = all.find((p) => p.source_key === rec.source_key);
+    if (dupe) {
+      await done;
+      return dupe;
+    }
+  }
+  store.put(rec);
+  await done;
+  return rec;
+}
+
+export async function listPending() {
+  const db = await openDB();
+  const { t } = tx(db, ['pending'], 'readonly');
+  const all = await req(t.objectStore('pending').getAll());
+  // Oldest first: the top of the inbox is the thing that has waited longest.
+  return all.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+}
+
+export async function countPending() {
+  const db = await openDB();
+  const { t } = tx(db, ['pending'], 'readonly');
+  return req(t.objectStore('pending').count());
+}
+
+export async function deletePending(id) {
+  const db = await openDB();
+  const { t, done } = tx(db, ['pending'], 'readwrite');
+  t.objectStore('pending').delete(id);
+  await done;
+}
+
 /** Wipe everything. Settings screen only, behind a confirm. */
 export async function resetAll() {
   const db = await openDB();
-  const { t, done } = tx(db, ['events', 'transactions', 'meta'], 'readwrite');
-  t.objectStore('events').clear();
-  t.objectStore('transactions').clear();
-  t.objectStore('meta').clear();
+  const stores = ['events', 'transactions', 'meta', 'pending'];
+  const { t, done } = tx(db, stores, 'readwrite');
+  for (const s of stores) t.objectStore(s).clear();
   await done;
 }
