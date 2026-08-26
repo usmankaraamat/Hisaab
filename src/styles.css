@@ -19,6 +19,7 @@
   --c-pos: #16a34a;   /* under budget · income · money coming back */
   --c-neg: #dc2626;   /* over budget · a rise · a deficit */
   --c-info: #2a78d6;  /* second series (spend, against income) */
+  --c-warn: #d98a00;  /* nearing a limit — reserved status, theme-invariant-ish */
   --c-grid: var(--line);
 }
 
@@ -258,6 +259,95 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 .st-delta { font-size: .7rem; font-variant-numeric: tabular-nums; }
 .st-up { color: var(--danger); }
 .st-down { color: var(--accent); }
+
+/* ---------- To be resolved (pending inbox) ---------- */
+
+.inbox { margin-top: 26px; }
+.inbox-head { display: flex; align-items: baseline; justify-content: space-between; }
+.inbox-head .recent-head { margin-top: 0; }
+
+.paste-box { margin: 8px 0 4px; }
+.paste-box textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: .9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  resize: vertical;
+}
+.paste-actions { display: flex; justify-content: flex-end; gap: 12px; align-items: center; margin-top: 6px; }
+.paste-msg { margin: 4px 0 0; }
+
+.inbox-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-empty { color: var(--muted); font-size: .82rem; padding: 4px 2px; }
+.inbox.empty .inbox-list { gap: 0; }
+
+.inbox-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.inbox-open {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.inbox-amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inbox-amt.out { color: var(--out); }
+.inbox-amt.in { color: var(--in); }
+.inbox-meta { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
+.inbox-meta b { color: var(--text); font-weight: 600; }
+.inbox-tag {
+  margin-left: 6px; padding: 1px 6px; font-size: .68rem; font-weight: 600;
+  color: var(--c-warn); border: 1px solid var(--c-warn); border-radius: 6px;
+}
+
+.resolve { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+.resolve-raw {
+  margin: 10px 0 12px; padding: 8px 10px;
+  color: var(--muted); font-size: .76rem; line-height: 1.4;
+  background: var(--bg); border-radius: 8px;
+}
+.resolve-item { display: flex; gap: 8px; margin-bottom: 8px; }
+.resolve-item input[name="name"] { flex: 1; min-width: 0; }
+.resolve-item input[name="amt"] { width: 92px; text-align: right; }
+.resolve-item input {
+  padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.resolve-del {
+  flex: none; width: 34px; font-size: 1.1rem; line-height: 1;
+  color: var(--muted); background: none; border: 1px solid var(--line);
+  border-radius: 10px; cursor: pointer;
+}
+.resolve-add { padding: 2px 0; }
+.resolve-sum { margin: 6px 0 12px; }
+.resolve-sum.ok { color: var(--accent); }
+.resolve-actions { display: flex; justify-content: space-between; gap: 10px; }
+.resolve-actions button, .paste-actions button[type="submit"] {
+  padding: 9px 16px; font: inherit; font-size: .85rem;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.resolve-actions button[type="submit"], .paste-actions button[type="submit"] {
+  min-width: 96px; font-weight: 600; color: var(--bg);
+  background: var(--accent); border-color: var(--accent);
+}
+.resolve-actions button[type="submit"]:disabled { opacity: .5; }
+.resolve-actions button[data-act="dismiss"] { color: var(--danger); border-color: var(--danger); background: none; }
 
 ul.recent, .day ul { list-style: none; margin: 0; padding: 0; }
 
@@ -885,6 +975,81 @@ label.stack input {
 .dv-label { fill: var(--text); font-size: 9px; font-family: inherit; }
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
+
+/* Auto-capture setup in Settings. */
+.ingest-body {
+  margin: 6px 0 10px; padding: 10px 12px; overflow-x: auto;
+  font: .74rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; white-space: pre;
+}
+.ingest-toggle { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: .88rem; }
+.ingest-toggle input { width: auto; }
+#ingest-box input[readonly] { color: var(--muted); }
+
+/* Ask box on the Spending tab. */
+.ask #ask-form { display: flex; gap: 8px; }
+.ask #ask-q {
+  flex: 1; min-width: 0; padding: 10px 12px; font: inherit;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.ask #ask-form button {
+  padding: 10px 16px; font: inherit; font-weight: 600; color: var(--bg);
+  background: var(--accent); border: 1px solid var(--accent); border-radius: 10px; cursor: pointer;
+}
+.ask-a { margin: 12px 2px 0; font-size: .95rem; }
+.ask-link { margin-left: 4px; }
+
+/* Recurring schedule inputs in Settings. */
+.sched-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.sched-add #sched-name { grid-column: 1 / -1; }
+.sched-add label.stack { margin: 0; grid-column: 1 / -1; }
+.sched-add input, .sched-add select {
+  width: 100%; padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.sched-add #add-sched {
+  grid-column: 1 / -1; font-weight: 600; color: var(--bg);
+  background: var(--accent); border-color: var(--accent); cursor: pointer;
+}
+.rule-row small { color: var(--muted); }
+
+/* Capture rules in Settings. */
+.rule-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.rule-desc { overflow: hidden; text-overflow: ellipsis; }
+.rule-add { display: flex; gap: 8px; margin-top: 10px; }
+.rule-add input { flex: 1; min-width: 0; }
+.rule-add input, .rule-add select {
+  padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.rule-add button {
+  padding: 9px 16px; font: inherit; font-weight: 600; color: var(--bg);
+  background: var(--accent); border: 1px solid var(--accent); border-radius: 10px; cursor: pointer;
+}
+
+/* "Remember this category" in the History editor. */
+.h-remember { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: .84rem; color: var(--muted); }
+.h-remember input { width: auto; margin: 0; }
+
+/* Category budget inputs in Settings. */
+.cat-budgets { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-bottom: 8px; }
+.cat-budgets label.stack { margin: 6px 0 2px; }
+
+/* Per-category budgets. */
+.buds { display: flex; flex-direction: column; gap: 14px; }
+.bud { text-align: left; cursor: pointer; }
+.bud-head { display: flex; justify-content: space-between; gap: 12px; font-size: .92rem; }
+.bud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bud-head .num { white-space: nowrap; }
+.bud-cap { color: var(--muted); font-weight: 400; }
+.bud-bar { display: block; height: 8px; margin: 5px 0 3px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.bud-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bud-bar.near > span { background: var(--c-warn); }
+.bud-bar.over > span { background: var(--c-neg); }
+.bud-sub { color: var(--muted); font-size: .76rem; }
+.bud-sub.over { color: var(--danger); font-weight: 600; }
 
 /* Sparklines that sit beside a number. */
 .spark { display: block; overflow: visible; }

@@ -54,6 +54,49 @@ Suggestion chips are ranked by hour-of-day against your own history, so the top
 chip is the morning commute at 09:00 and the gym ride home at 21:00. Ride entries
 are ~30% of all entries, and this turns most of them into one tap.
 
+## Capture from a notification
+
+The hardest part of an entry — the amount, and which way the money went — is
+already sitting in the payment notification easypaisa, NayaPay, or a bank just
+sent you. So a notification becomes a **To be resolved** item on the home screen,
+and the only thing left is to say what the money was for. One payment can be
+split across several things: the line items have to add back to the amount that
+actually moved, the same rule shared expenses already follow.
+
+`src/capture/notif.js` reads the real formats — `You have Received Rs. 50.00 from
+Bank BAF`, `Rs. 675.0 … sent to AWAIS IQBAL via Raast`, an HBL SMS — pulling out
+the amount (never the `Fee … Rs. 0.00` line), the direction, the counterparty and
+the date. Nothing is a category yet; the meaning is still the person's to give.
+
+Three ways in, in order of how little they ask:
+
+- **Auto-forward.** A phone automation posts each notification to a private,
+  RLS-scoped endpoint; the app pulls and parses it. Captures appear with no
+  action at all. Ten-minute one-time setup — see [`docs/auto-capture.md`](docs/auto-capture.md).
+- **Share.** With Hisaab installed, share a notification from Android's share
+  sheet straight into the inbox.
+- **Paste.** Tap *Paste a message* and paste the text.
+
+Everything but auto-forward needs no server and no setup, and even auto-forward
+only ever relays the raw text you choose to forward.
+
+## Rules, budgets, recurring, and Ask
+
+Four smaller conveniences layer onto the same offline, private core:
+
+- **Rules** — "anything containing *indrive* is Rides." Set the category once, at
+  capture, and the model never re-decides it. Fixing a category in History offers
+  to remember it as a rule, so corrections teach the app.
+- **Category budgets** — a monthly cap per category, with a progress bar on the
+  Spending tab and an over-budget flag (the reserved critical colour plus an
+  explicit "over by", never colour alone).
+- **Recurring** — tell the app about rent or a subscription and its occurrence
+  drops into the inbox when due, for a one-tap confirm. It never logs money that
+  may not have moved.
+- **Ask** — a one-line question box over the local ledger ("how much on eating out
+  last month", "who owes me the most"), answered on the device with no model and
+  no data leaving the phone.
+
 ## Shared expenses
 
 Paying for other people is a debt, not a purchase, and one row cannot say that.

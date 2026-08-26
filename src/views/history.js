@@ -13,7 +13,16 @@
  *   when the two differ, so a rewrite is always visible and never silent.
  */
 
-import { listTransactions, deleteTransaction, updateTransaction } from '../db/local.js';
+import {
+  listTransactions,
+  deleteTransaction,
+  updateTransaction,
+  getMeta,
+  setMeta,
+  newId,
+} from '../db/local.js';
+import { CATEGORIES } from '../lib/categories.js';
+import { suggestMatch } from '../lib/rules.js';
 import { formatTxnAmount, formatMinor, toMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { txnLabel, hasRewrite } from '../lib/label.js';
@@ -325,6 +334,18 @@ function editor(r, body, controls) {
     <label>When
       <input name="when" type="datetime-local" value="${toLocalInput(r.occurred_at)}" />
     </label>
+    <label>Category
+      <select name="category">
+        <option value=""${r.category ? '' : ' selected'}>—</option>
+        ${CATEGORIES.map(
+          (c) => `<option value="${escapeHtml(c)}"${r.category === c ? ' selected' : ''}>${escapeHtml(c)}</option>`
+        ).join('')}
+      </select>
+    </label>
+    <label class="h-remember" hidden>
+      <input type="checkbox" name="remember" />
+      <span></span>
+    </label>
     <p class="h-edit-msg" hidden></p>
     <div class="h-edit-actions">
       <button type="button" data-act="delete" class="danger">Delete</button>
@@ -337,6 +358,19 @@ function editor(r, body, controls) {
     msg.hidden = false;
     msg.textContent = text;
   };
+
+  // Offer to remember a category correction as a rule — the learning loop.
+  // Only when the category is actually being changed to something.
+  const catSelect = form.querySelector('select[name="category"]');
+  const remember = form.querySelector('.h-remember');
+  const match = suggestMatch(r.raw_name);
+  catSelect.addEventListener('change', () => {
+    const changed = catSelect.value && catSelect.value !== r.category;
+    remember.hidden = !changed || !match;
+    if (changed) {
+      remember.querySelector('span').textContent = `Always file “${match}” as ${catSelect.value}`;
+    }
+  });
 
   form.addEventListener('click', async (e) => {
     const act = e.target.closest('button[data-act]')?.dataset.act;
@@ -381,7 +415,28 @@ function editor(r, body, controls) {
       });
     }
 
+    // An explicit category wins over the model and sticks: mark it done so the
+    // enrichment pass will not re-file it. This runs after the clear above, so a
+    // simultaneous name edit does not wipe the category the user just chose.
+    const chosenCat = fields.category.value || null;
+    if (chosenCat !== (r.category || null)) {
+      patch.category = chosenCat;
+      if (chosenCat) {
+        patch.enriched_at = new Date().toISOString();
+        patch.enriched = 1;
+      }
+    }
+
     await updateTransaction(r.id, patch);
+
+    // Learn: turn the correction into a rule if asked.
+    if (fields.remember?.checked && chosenCat && match) {
+      const existing = await getMeta('capture.rules', []);
+      if (!existing.some((rule) => rule.match === match && rule.category === chosenCat)) {
+        await setMeta('capture.rules', [...existing, { id: newId(), match, category: chosenCat }]);
+      }
+    }
+
     invalidate();
     syncNow().catch(() => {});
     await paint(body, controls);

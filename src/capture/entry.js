@@ -14,10 +14,18 @@ import {
   addTransactions,
   deleteTransaction,
   allTransactions,
+  listPending,
+  addPending,
+  deletePending,
   getMeta,
+  setMeta,
 } from '../db/local.js';
-import { formatMinor } from '../lib/money.js';
+import { parseNotification } from './notif.js';
+import { matchRule, ruleFields } from '../lib/rules.js';
+import { dueSchedules, advanceSchedule, occurrenceKey } from '../lib/schedule.js';
+import { formatMinor, toMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
+import { syncNow } from '../db/sync.js';
 import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
 import { sparkPoints } from '../lib/chart.js';
 import { findDuplicate } from '../lib/dupes.js';
@@ -67,6 +75,23 @@ export async function renderAdd(root) {
 
       <p class="allowance" id="allowance" hidden></p>
 
+      <section class="inbox" id="inbox">
+        <div class="inbox-head">
+          <h2 class="recent-head">To be resolved</h2>
+          <button type="button" class="link" id="paste-notif">Paste a message</button>
+        </div>
+        <form class="paste-box" id="paste-box" hidden>
+          <textarea id="paste-text" rows="3" placeholder="Paste a bank or wallet notification…"
+            spellcheck="false"></textarea>
+          <div class="paste-actions">
+            <button type="button" class="link" id="paste-cancel">Cancel</button>
+            <button type="submit">Add</button>
+          </div>
+          <p class="paste-msg hint" id="paste-msg"></p>
+        </form>
+        <ul class="inbox-list" id="inbox-list"></ul>
+      </section>
+
       <h2 class="recent-head">Spending so far</h2>
       <div class="spend-tiles" id="spend-tiles"></div>
     </section>
@@ -81,6 +106,12 @@ export async function renderAdd(root) {
   const dirButtons = [...root.querySelectorAll('.direction button')];
   const toast = root.querySelector('#toast');
   const spendTiles = root.querySelector('#spend-tiles');
+  const inbox = root.querySelector('#inbox');
+  const inboxList = root.querySelector('#inbox-list');
+  const pasteBtn = root.querySelector('#paste-notif');
+  const pasteBox = root.querySelector('#paste-box');
+  const pasteText = root.querySelector('#paste-text');
+  const pasteMsg = root.querySelector('#paste-msg');
   const datalist = root.querySelector('#known-names');
   const warning = root.querySelector('#surge');
   const splitBox = root.querySelector('#split');
@@ -97,6 +128,20 @@ export async function renderAdd(root) {
   // The split shown in the preview, and whether the user has overridden it.
   let plan = null;
   let splitOverride = null;
+  // Deterministic capture rules, applied to plain entries before the model runs.
+  let rules = [];
+
+  /* If a rule matches, set its category outright and mark the row done so the
+   * enrichment pass leaves it alone. Splits are exempt: they already carry a
+   * stated meaning. Returns the input, mutated. */
+  function applyRule(input) {
+    const fields = ruleFields(matchRule(rules, input.raw_name));
+    if (fields) {
+      input.category = fields.category;
+      input.enriched_at = new Date().toISOString();
+    }
+    return input;
+  }
 
   function currentParse() {
     const parsed = parseEntry(input.value);
@@ -410,6 +455,230 @@ export async function renderAdd(root) {
     ].join('');
   }
 
+  /* ---------------------------------------------------------- pending inbox */
+
+  /**
+   * Captures waiting to be resolved — a payment notification whose amount is
+   * known but whose *meaning* is not. This is the other half of the capture
+   * thesis: the notification already did the typing, so all that is left is to
+   * say what the money was for, and to split one payment across several things
+   * when that is what it was.
+   */
+  /* Surface any recurring charge that has come due into the inbox, then advance
+   * it. Idempotent: the occurrence key means running this on every refresh adds
+   * each due charge exactly once. */
+  async function materializeDue() {
+    const schedules = await getMeta('schedules', []);
+    const due = dueSchedules(schedules, new Date());
+    if (!due.length) return;
+    for (const s of due) {
+      await addPending({
+        amountMinor: s.amountMinor,
+        direction: s.direction,
+        counterparty: s.name,
+        category: s.category || null,
+        source: 'Recurring',
+        kind: 'recurring',
+        source_key: occurrenceKey(s),
+        occurred_at: s.nextDue,
+        raw: `${s.name} — recurring ${s.cadence}`,
+      });
+    }
+    const now = new Date();
+    const advanced = schedules.map((s) =>
+      due.some((d) => d.id === s.id) ? advanceSchedule(s, now) : s
+    );
+    await setMeta('schedules', advanced);
+  }
+
+  async function refreshPending() {
+    await materializeDue();
+    const items = await listPending();
+    inboxList.innerHTML = '';
+    if (!items.length) {
+      inbox.classList.add('empty');
+      inboxList.innerHTML =
+        '<li class="inbox-empty hint">Nothing waiting. Forward or paste a payment message and it lands here.</li>';
+      return;
+    }
+    inbox.classList.remove('empty');
+    for (const p of items) inboxList.append(pendingRow(p));
+  }
+
+  function dirWord(dir) {
+    return dir === 'in' ? 'Received' : 'Sent';
+  }
+
+  function pendingRow(p) {
+    const li = document.createElement('li');
+    li.className = 'inbox-row';
+    const bits = [p.source || 'payment', p.counterparty].filter(Boolean).join(' · ');
+    const tag = p.kind === 'recurring' ? '<span class="inbox-tag">due</span>' : '';
+    li.innerHTML = `
+      <button type="button" class="inbox-open">
+        <span class="inbox-amt ${p.direction}">${p.direction === 'in' ? '+' : ''}${formatMinor(
+          p.amountMinor
+        )}</span>
+        <span class="inbox-meta"><b>${dirWord(p.direction)}</b> · ${escapeHtml(bits)}${tag}</span>
+      </button>`;
+    li.querySelector('.inbox-open').addEventListener('click', () => {
+      if (li.querySelector('form')) return;
+      li.append(resolver(p, li));
+      li.querySelector('input[name="name"]')?.focus();
+    });
+    return li;
+  }
+
+  /**
+   * Resolve one pending capture into real transactions. The captured amount is
+   * the truth — money that actually moved — so the line items must add back to
+   * it, the same rule the shared-expense split already lives by. Each item is a
+   * normal capture line: "for sister" splits it, "reimbursement from tom" nets
+   * it, plain text is an ordinary entry.
+   */
+  function resolver(p, li) {
+    const form = document.createElement('form');
+    form.className = 'resolve';
+
+    const itemRow = (name = '', amountMinor = null) => `
+      <div class="resolve-item">
+        <input name="name" type="text" placeholder="what was it for?" spellcheck="false"
+          value="${escapeHtml(name)}" />
+        <input name="amt" type="text" inputmode="decimal" placeholder="amount"
+          value="${amountMinor === null ? '' : (amountMinor / 100).toFixed(2).replace(/\.00$/, '')}" />
+        <button type="button" class="resolve-del" aria-label="Remove item">×</button>
+      </div>`;
+
+    form.innerHTML = `
+      ${p.raw ? `<p class="resolve-raw">${escapeHtml(p.raw)}</p>` : ''}
+      <div class="resolve-items">${itemRow(p.counterparty || '', p.amountMinor)}</div>
+      <button type="button" class="link resolve-add">+ Add another item</button>
+      <p class="resolve-sum hint"></p>
+      <div class="resolve-actions">
+        <button type="button" class="danger" data-act="dismiss">Dismiss</button>
+        <button type="submit">Log</button>
+      </div>`;
+
+    const items = form.querySelector('.resolve-items');
+    const sumLine = form.querySelector('.resolve-sum');
+    const submit = form.querySelector('button[type="submit"]');
+
+    const readItems = () =>
+      [...items.querySelectorAll('.resolve-item')].map((row) => ({
+        name: row.querySelector('input[name="name"]').value.trim(),
+        amtMinor: toMinor(row.querySelector('input[name="amt"]').value),
+      }));
+
+    function refreshSum() {
+      const rows = readItems();
+      const sum = rows.reduce((a, r) => a + (r.amtMinor || 0), 0);
+      const diff = p.amountMinor - sum;
+      const balanced = Math.abs(diff) < 1;
+      sumLine.textContent = balanced
+        ? `Adds up to ${formatMinor(p.amountMinor)}.`
+        : diff > 0
+          ? `${formatMinor(diff)} left of ${formatMinor(p.amountMinor)} to account for.`
+          : `${formatMinor(-diff)} over the ${formatMinor(p.amountMinor)} received.`;
+      sumLine.className = `resolve-sum hint${balanced ? ' ok' : ''}`;
+      submit.disabled = !balanced || rows.some((r) => !r.name);
+    }
+
+    items.addEventListener('input', refreshSum);
+    items.addEventListener('click', (e) => {
+      if (!e.target.closest('.resolve-del')) return;
+      if (items.querySelectorAll('.resolve-item').length <= 1) return;
+      e.target.closest('.resolve-item').remove();
+      refreshSum();
+    });
+
+    form.querySelector('.resolve-add').addEventListener('click', () => {
+      // Seed the new row with whatever is still unaccounted for.
+      const sum = readItems().reduce((a, r) => a + (r.amtMinor || 0), 0);
+      const left = Math.max(0, p.amountMinor - sum);
+      items.insertAdjacentHTML('beforeend', itemRow('', left || null));
+      refreshSum();
+      items.querySelector('.resolve-item:last-child input[name="name"]').focus();
+    });
+
+    form.addEventListener('click', async (e) => {
+      if (e.target.closest('button[data-act="dismiss"]')) {
+        await deletePending(p.id);
+        await refreshPending();
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const rows = readItems();
+      if (rows.some((r) => !r.name || !r.amtMinor)) return;
+
+      for (const it of rows) {
+        const plan = planEntry(it.name, it.amtMinor, p.direction, { knownPeople: people });
+        if (plan) {
+          await addTransactions(
+            plan.rows.map((r) => ({ ...r, occurred_at: p.occurred_at })),
+            { source_text: it.name }
+          );
+        } else {
+          const input = applyRule({
+            raw_name: it.name,
+            amount_minor: it.amtMinor,
+            direction: p.direction,
+            occurred_at: p.occurred_at,
+          });
+          // A recurring capture carries its category; use it unless a rule
+          // already spoke.
+          if (!input.category && p.category) {
+            input.category = p.category;
+            input.enriched_at = new Date().toISOString();
+          }
+          await addTransaction(input);
+        }
+      }
+
+      await deletePending(p.id);
+      invalidate();
+      syncNow().catch(() => {});
+      showToast(
+        rows.length > 1
+          ? `Logged ${formatMinor(p.amountMinor)} across ${rows.length} entries`
+          : `Logged ${formatMinor(p.amountMinor)} · ${rows[0].name}`
+      );
+      await refreshAll();
+    });
+
+    refreshSum();
+    return form;
+  }
+
+  function openPaste(prefill = '') {
+    pasteBox.hidden = false;
+    pasteMsg.textContent = '';
+    pasteText.value = prefill;
+    pasteText.focus();
+  }
+
+  pasteBtn.addEventListener('click', () => {
+    if (pasteBox.hidden) openPaste();
+    else pasteBox.hidden = true;
+  });
+  root.querySelector('#paste-cancel').addEventListener('click', () => {
+    pasteBox.hidden = true;
+  });
+  pasteBox.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const parsed = parseNotification(pasteText.value);
+    if (!parsed) {
+      pasteMsg.className = 'paste-msg warn';
+      pasteMsg.textContent = "Couldn't find an amount in that. Paste the whole message.";
+      return;
+    }
+    await addPending({ ...parsed, occurred_at: parsed.occurredAt });
+    pasteText.value = '';
+    pasteBox.hidden = true;
+    await refreshPending();
+  });
+
   /**
    * What is left, on the screen where money gets spent.
    *
@@ -448,6 +717,7 @@ export async function renderAdd(root) {
 
   async function refreshAll() {
     history = await allTransactions();
+    rules = await getMeta('capture.rules', []);
     people = [...new Set(history.map((r) => r.counterparty_name).filter(Boolean))];
     refreshSpendTiles();
     await Promise.all([
@@ -455,6 +725,7 @@ export async function renderAdd(root) {
       refreshNames(),
       refreshSuggestions(),
       refreshAllowance(),
+      refreshPending(),
     ]);
   }
 
@@ -473,7 +744,7 @@ export async function renderAdd(root) {
 
     const written = commit
       ? await addTransactions(commit.rows, { source_text: name })
-      : [await addTransaction({ raw_name: name, amount_minor: amountMinor, direction: dir })];
+      : [await addTransaction(applyRule({ raw_name: name, amount_minor: amountMinor, direction: dir }))];
 
     input.value = '';
     setDirection('out', { silent: true });

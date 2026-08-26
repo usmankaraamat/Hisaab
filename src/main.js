@@ -7,7 +7,9 @@ import { renderLedger } from './views/ledger.js';
 import { renderSpending } from './views/spending.js';
 import { renderOverview } from './views/overview.js';
 import { startAutoSync } from './db/sync.js';
-import { setMeta } from './db/local.js';
+import { pullInbox } from './db/ingest.js';
+import { setMeta, addPending } from './db/local.js';
+import { parseNotification } from './capture/notif.js';
 import { invalidate } from './capture/predict.js';
 import { parseHash, go } from './nav.js';
 
@@ -44,7 +46,29 @@ tabs.addEventListener('click', (e) => {
 
 window.addEventListener('hashchange', show);
 
+/* Web Share Target: an installed Hisaab appears in Android's share sheet, so a
+ * payment notification (or its copied text) can be shared straight in. It
+ * arrives as ?text=…&title=… on the start URL; parse it into the pending inbox,
+ * strip the query so a refresh does not re-add it, and land on the capture
+ * screen where the inbox lives. */
+async function handleShare() {
+  const q = new URLSearchParams(location.search);
+  const shared = [q.get('text'), q.get('title'), q.get('url')].filter(Boolean).join(' ').trim();
+  if (!shared) return;
+  const parsed = parseNotification(shared);
+  if (parsed) await addPending({ ...parsed, occurred_at: parsed.occurredAt });
+  // Drop the query string but keep the hash route.
+  history.replaceState(null, '', location.pathname + (location.hash || '#add'));
+}
+
+await handleShare();
 show();
+
+// Auto-capture: pull any forwarded notifications on load. Gated + best-effort
+// inside pullInbox, so this is a no-op unless the user has set it up.
+pullInbox().then((r) => {
+  if (r?.pulled && parseHash().name === 'add') show();
+});
 
 // Sync runs entirely off the capture path — a failure here must never surface
 // as an error on the Add screen.
@@ -55,6 +79,9 @@ startAutoSync(async (result) => {
     invalidate();
     if (parseHash().name !== 'settings') await show();
   }
+  // Piggyback the inbox pull on the same cadence as sync.
+  const ingest = await pullInbox().catch(() => null);
+  if (ingest?.pulled && parseHash().name === 'add') await show();
 });
 
 // sw.js lives in public/, so it is served from the deploy base — not from the

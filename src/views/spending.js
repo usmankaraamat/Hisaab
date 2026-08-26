@@ -19,8 +19,9 @@
  */
 
 import { allTransactions, getMeta } from '../db/local.js';
-import { budgetSummary, categoryTotals, spendPace, ON_OTHERS } from '../lib/budget.js';
+import { budgetSummary, categoryTotals, categoryBudgets, spendPace, ON_OTHERS } from '../lib/budget.js';
 import { savingsPot } from '../lib/trends.js';
+import { answerQuery } from '../lib/query.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
 import { bridgeLayout, linePoints, gridLines, ceilNice, FRAME } from '../lib/chart.js';
 import { formatMinor } from '../lib/money.js';
@@ -33,10 +34,11 @@ export async function renderSpending(root) {
   root.innerHTML = '<section class="spending"><h2>Spending</h2><div id="spend-body"></div></section>';
   const host = root.querySelector('#spend-body');
 
-  const [rows, opening, target] = await Promise.all([
+  const [rows, opening, target, budgets] = await Promise.all([
     allTransactions(),
     getMeta('budget.opening', null),
     getMeta('budget.savingsTarget', 0),
+    getMeta('budget.categories', {}),
   ]);
 
   if (!rows.length) {
@@ -51,8 +53,10 @@ export async function renderSpending(root) {
 
   host.innerHTML = [
     leftCard(budget),
+    askCard(),
     bridgeCard(budget),
     paceCard(rows, budget, now),
+    categoryBudgetsCard(rows, budget, budgets),
     '<div class="card" id="breakdown-card"></div>',
     committedCard(budget),
     faresCard(rows),
@@ -66,6 +70,54 @@ export async function renderSpending(root) {
   const breakdownHost = host.querySelector('#breakdown-card');
   const range = { from: toDateInput(budget.since), to: '' };
   paintBreakdown(breakdownHost, rows, budget, range);
+
+  wireAsk(host, rows, now);
+}
+
+/**
+ * A one-line question box over the local ledger — offline, private, no model.
+ * It answers the handful of things people actually ask ("how much on eating out
+ * last month", "who owes me the most") and, when the answer is a filtered total,
+ * offers to open exactly those entries.
+ */
+function askCard() {
+  return `<div class="card ask" id="ask-card">
+    <h3>Ask</h3>
+    <form id="ask-form" autocomplete="off">
+      <input id="ask-q" type="text" placeholder="how much on eating out last month?"
+        spellcheck="false" aria-label="Ask about your spending" />
+      <button type="submit">Ask</button>
+    </form>
+    <p class="ask-a" id="ask-a" hidden></p>
+  </div>`;
+}
+
+function wireAsk(host, rows, now) {
+  const form = host.querySelector('#ask-form');
+  const input = host.querySelector('#ask-q');
+  const out = host.querySelector('#ask-a');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const a = answerQuery(input.value, rows, { now });
+    out.hidden = false;
+    out.textContent = a.text;
+    if (a.category || a.person || a.from) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'link ask-link';
+      link.textContent = a.person ? 'See the ledger' : 'See the entries';
+      link.addEventListener('click', () => {
+        if (a.person) return go('ledger');
+        const params = {};
+        if (a.category) params.cat = a.category;
+        if (a.from) params.from = toDateInput(a.from);
+        if (a.to) params.to = toDateInput(a.to);
+        go('history', params);
+      });
+      out.append(' ');
+      out.append(link);
+    }
+  });
 }
 
 /** ISO instant -> the "YYYY-MM-DD" a date input expects, in local time. */
@@ -234,6 +286,47 @@ function bridgeCard(b) {
        ${connectors}${rects}
      </svg>`,
     'Your cash, less what is already spoken for, is what is safe to spend.'
+  );
+}
+
+/**
+ * Per-category budgets for this period. A single safe-to-spend number cannot say
+ * "you set aside 8,000 for Eating Out and you are already at 9,200"; this can.
+ * Over-budget rows are the reserved critical colour with an explicit "over by"
+ * label, so the alert never rests on colour alone.
+ */
+function categoryBudgetsCard(rows, b, budgets) {
+  if (b.anchoredTo === 'none') return '';
+  const list = categoryBudgets(rows, budgets, { from: b.since });
+  if (!list.length) return '';
+
+  const bars = list
+    .map((c) => {
+      const width = Math.min(100, c.pct);
+      const state = c.over ? 'over' : c.pct >= 80 ? 'near' : '';
+      const note = c.over
+        ? `over by ${formatMinor(-c.remainingMinor)}`
+        : `${formatMinor(c.remainingMinor)} left`;
+      return `<div class="bud" data-cat="${escapeHtml(c.category)}">
+        <div class="bud-head">
+          <span class="bud-name">${escapeHtml(c.category)}</span>
+          <span class="num">${formatMinor(c.spentMinor)} <span class="bud-cap">/ ${formatMinor(
+            c.budgetMinor
+          )}</span></span>
+        </div>
+        <span class="bud-bar ${state}"><span style="width:${width}%"></span></span>
+        <span class="bud-sub ${c.over ? 'over' : ''}">${c.pct}% · ${note}</span>
+      </div>`;
+    })
+    .join('');
+
+  const over = list.filter((c) => c.over).length;
+  return card(
+    'Budgets this period',
+    `<div class="buds">${bars}</div>`,
+    over
+      ? `${over} categor${over === 1 ? 'y is' : 'ies are'} over budget. Tap to see the entries.`
+      : 'Tap a category to see the entries.'
   );
 }
 

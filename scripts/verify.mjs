@@ -22,7 +22,7 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
-import { budgetSummary, categoryTotals, calendarPeriod, spendPace, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
+import { budgetSummary, categoryTotals, categoryBudgets, calendarPeriod, spendPace, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
 import {
   barLayout, gridLines, ceilNice, shortMinor, FRAME,
@@ -34,6 +34,10 @@ import {
 } from '../src/lib/trends.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
+import { parseNotification } from '../src/capture/notif.js';
+import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
+import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
+import { answerQuery } from '../src/lib/query.js';
 import {
   rideSurge,
   priceIndex,
@@ -77,6 +81,31 @@ check('leading digits in name', p("26 Number - Anser's Home 250"), [
 check('collapses whitespace', p('  Diet   Coke   100  '), ['Diet Coke', 10000, 'out']);
 check('empty input', p(''), ['', null, 'out']);
 check('amount only', p('300'), ['', 30000, 'out']);
+
+console.log('\n--- parseNotification (real wallet/bank formats) ---');
+const notif = (text, app) => {
+  const r = parseNotification(text, { appName: app });
+  return r && [r.amountMinor, r.direction, r.counterparty, r.source, r.occurredAt];
+};
+check('easypaisa received (fee line ignored)',
+  notif('Trx ID 53945346065. You have Received Rs. 50.00 from , Bank BAF in your Easypaisa Account. Fee for this transaction is Rs. 0.00.', 'easypaisa'),
+  [5000, 'in', 'Bank BAF', 'easypaisa', null]);
+check('Bank Alfalah sent, with date',
+  notif('Transaction Alert PKR 50.00 sent to MALIK USMAN KARAMAT TMB from your BAF A/C **9388 on 10-Aug-26 14:23:57 via FT Tx ID FT262220PL86PYMF', 'Alfa'),
+  [5000, 'out', 'MALIK USMAN KARAMAT', 'Bank Alfalah', '2026-08-10T14:23:57.000Z']);
+check('NayaPay sent (no amount decimals)',
+  notif("Off it goes Rs. 10 sent to Usman Karamat. Your wallet's seen better days.", 'NayaPay'),
+  [1000, 'out', 'Usman Karamat', 'NayaPay', null]);
+check('easypaisa Raast sent, ISO date',
+  notif('Dear MALIK USMAN KARAMAT, An amount of Rs. 675.0 has been successfully sent to AWAIS IQBAL in *******3787 via Raast Payment from your Easypaisa account *****19 on 2026-08-09 at 14:18:28.404552834. Trx ID 3945073211.', 'easypaisa'),
+  [67500, 'out', 'AWAIS IQBAL', 'easypaisa', '2026-08-09T14:18:28.000Z']);
+check('HBL SMS received, day-first date',
+  notif('PKR 10.00 received from MALIK USMAN KARAMAT IBAN in your HBL A/C via your Raast ID on 09/08/2026 14:24:13 TXN ID SM091424115A8429.', '14250'),
+  [1000, 'in', 'MALIK USMAN KARAMAT', 'HBL', '2026-08-09T14:24:13.000Z']);
+check('a message with no amount is not a capture',
+  parseNotification('Your OTP is 4821, do not share it with anyone.'), null);
+check('a fee-only line does not log zero',
+  parseNotification('Fee for this transaction is Rs. 0.00.'), null);
 
 const csvPath = join(here, '..', 'TransactionsLatest.csv');
 const hasCsv = existsSync(csvPath);
@@ -324,6 +353,70 @@ check('savings never appears as a spending category',
   cats.some((c) => c.category === 'Savings'), false);
 check('an uncategorised row is reported, not dropped',
   categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
+
+console.log('\n--- capture rules ---');
+const ruleset = [
+  { id: '1', match: 'indrive', category: 'Rides' },
+  { id: '2', match: 'k-electric', category: 'Utilities' },
+];
+check('a rule matches on a contained word',
+  matchRule(ruleset, 'Indrive Home-Office')?.category, 'Rides');
+check('matching is case-insensitive', matchRule(ruleset, 'INDRIVE flat')?.category, 'Rides');
+check('an unmatched name yields no rule', matchRule(ruleset, 'chicken karahi'), null);
+check('the first matching rule wins',
+  matchRule([{ match: 'a', category: 'X' }, { match: 'app', category: 'Y' }], 'apple')?.category, 'X');
+check('a rule contributes only a category', ruleFields(ruleset[0]), { category: 'Rides' });
+check('a suggested match is the first word', suggestMatch('Indrive Home-Office'), 'indrive');
+
+console.log('\n--- recurring schedules ---');
+check('a monthly schedule steps by a month',
+  nextDueAfter('2026-01-15T09:00:00.000Z', 'monthly').slice(0, 10), '2026-02-15');
+check('a weekly one steps by seven days',
+  nextDueAfter('2026-01-15T09:00:00.000Z', 'weekly').slice(0, 10), '2026-01-22');
+const scheds = [
+  { id: 'rent', name: 'Rent', amountMinor: 2500000, direction: 'out', cadence: 'monthly', nextDue: '2026-08-01T09:00:00.000Z' },
+  { id: 'gym', name: 'Gym', amountMinor: 300000, direction: 'out', cadence: 'monthly', nextDue: '2026-09-20T09:00:00.000Z' },
+];
+check('only a due schedule surfaces',
+  dueSchedules(scheds, asOfAug8).map((s) => s.id), ['rent']);
+// Dormant since 1 Aug: advancing past 8 Aug lands on 1 Sep, not a backlog of one per month.
+check('a due schedule advances to its next future occurrence',
+  advanceSchedule(scheds[0], asOfAug8).nextDue.slice(0, 10), '2026-09-01');
+check('an occurrence key is stable per due date',
+  occurrenceKey(scheds[0]), 'sched:rent:2026-08-01');
+
+console.log('\n--- per-category budgets ---');
+const budgetRows = [
+  spend({ raw_name: 'chicken', amount_minor: 120000, category: 'Groceries' }),
+  spend({ raw_name: 'more groceries', amount_minor: 40000, category: 'Groceries' }),
+  spend({ raw_name: 'burger', amount_minor: 90000, category: 'Eating Out' }),
+];
+const cb = categoryBudgets(budgetRows, { Groceries: 100000, 'Eating Out': 200000, Rent: 5000000 });
+check('a budget reports what is spent against it',
+  cb.find((c) => c.category === 'Groceries').spentMinor, 160000);
+check('and flags going over', cb.find((c) => c.category === 'Groceries').over, true);
+check('an under-budget category is not over',
+  cb.find((c) => c.category === 'Eating Out').over, false);
+check('the closest to its cap leads', cb[0].category, 'Groceries');
+check('a category with no spend still shows its cap',
+  cb.find((c) => c.category === 'Rent').spentMinor, 0);
+check('a zero cap is ignored', categoryBudgets(budgetRows, { Groceries: 0 }).length, 0);
+
+console.log('\n--- ask (local natural-language answers) ---');
+const qrows = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 10000000, category: 'Income', occurred_at: '2026-08-03T13:00:00.000Z' }),
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries', occurred_at: '2026-08-05T10:00:00.000Z' }),
+  spend({ raw_name: 'burger', amount_minor: 150000, category: 'Eating Out', occurred_at: '2026-08-05T10:00:00.000Z' }),
+  spend({ raw_name: 'old dinner', amount_minor: 50000, category: 'Eating Out', occurred_at: '2026-07-15T10:00:00.000Z' }),
+  spend({ raw_name: 'lent to Sara', amount_minor: 120000, category: 'Groceries', counterparty_name: 'Sara', ledger_effect: 'lent', occurred_at: '2026-08-04T10:00:00.000Z' }),
+];
+const ask = (question) => answerQuery(question, qrows, { now: asOfAug8 });
+check('a category question, this month', ask('how much on eating out this month').amountMinor, 150000);
+check('a category question, last month', ask('how much did I spend on eating out last month').amountMinor, 50000);
+check('total spend excludes what is still owed', ask('how much did I spend this month').amountMinor, 250000);
+check('the biggest category', ask('what was my biggest category this month').category, 'Eating Out');
+check('who owes me the most', ask('who owes me the most').person, 'Sara');
+check('how much a person owes', ask('how much does Sara owe').text, 'Sara owes you Rs 1,200.');
 
 console.log('\n--- the period is the calendar month, and reconciling does not move it ---');
 

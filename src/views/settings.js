@@ -8,11 +8,13 @@ import {
   resetAll,
   getMeta,
   setMeta,
+  newId,
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
+import { SPEND_CATEGORIES, CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
-import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
+import { isConfigured, currentUser, signIn, signOut, supabase } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
 import { escapeHtml } from '../capture/entry.js';
 
@@ -68,6 +70,60 @@ export async function renderSettings(root) {
       </div>
 
       <div class="card">
+        <h3>Category budgets</h3>
+        <p class="hint">
+          A monthly cap per category. The Spending tab shows how much of each is left this
+          period, and flags any you go over. Leave a box blank for no cap.
+        </p>
+        <div class="cat-budgets" id="cat-budgets"></div>
+        <p id="cat-budget-msg" class="hint"></p>
+        <button type="button" id="save-cat-budgets">Save budgets</button>
+      </div>
+
+      <div class="card">
+        <h3>Recurring &amp; reminders</h3>
+        <p class="hint">
+          Known charges — rent, a subscription, a salary. When one falls due it appears in
+          “To be resolved” on the home screen for a one-tap confirm.
+        </p>
+        <div id="sched-list"></div>
+        <div class="sched-add">
+          <input type="text" id="sched-name" placeholder="e.g. Rent" spellcheck="false" />
+          <input type="text" id="sched-amt" inputmode="decimal" placeholder="amount" />
+          <select id="sched-dir">
+            <option value="out">Spent</option>
+            <option value="in">Received</option>
+          </select>
+          <select id="sched-cat"></select>
+          <select id="sched-cadence">
+            <option value="monthly">Monthly</option>
+            <option value="fortnightly">Fortnightly</option>
+            <option value="weekly">Weekly</option>
+          </select>
+          <label class="stack">Next due
+            <input type="date" id="sched-due" />
+          </label>
+          <button type="button" id="add-sched">Add recurring</button>
+        </div>
+        <p id="sched-msg" class="hint"></p>
+      </div>
+
+      <div class="card">
+        <h3>Capture rules</h3>
+        <p class="hint">
+          Anything you type containing the match text is filed under its category at capture,
+          before the model runs. Add one here, or tap “remember” when you fix a category in
+          History.
+        </p>
+        <div id="rules-list"></div>
+        <div class="rule-add">
+          <input type="text" id="rule-match" placeholder="e.g. indrive" spellcheck="false" />
+          <select id="rule-cat"></select>
+          <button type="button" id="add-rule">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Count your cash</h3>
         <p class="hint">
           Tracked balances drift — a missed entry, a rounding, a note handed over and
@@ -80,6 +136,17 @@ export async function renderSettings(root) {
         </label>
         <p id="recon-msg" class="hint"></p>
         <button type="button" id="do-recon">Reconcile</button>
+      </div>
+
+      <div class="card">
+        <h3>Auto-capture <small>(advanced)</small></h3>
+        <p class="hint">
+          Forward payment notifications automatically. An automation app on your phone
+          (MacroDroid, Tasker, HTTP Shortcuts) posts each notification to your private
+          endpoint; the app turns them into “To be resolved” items. One-time setup — see
+          <code>docs/auto-capture.md</code>. Paste and share both work with no setup.
+        </p>
+        <div id="ingest-box"></div>
       </div>
 
       <div class="card">
@@ -288,6 +355,198 @@ export async function renderSettings(root) {
     budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
 
+  /* Auto-capture. A per-user token the phone automation carries; the client
+   * pulls forwarded messages when enabled. All best-effort — the feature is a
+   * convenience over manual paste, never a dependency. */
+  const ingestBox = root.querySelector('#ingest-box');
+  const ingestUrl = `${import.meta.env.VITE_SUPABASE_URL || '<your Supabase URL>'}/functions/v1/ingest`;
+
+  async function refreshIngest() {
+    const token = await getMeta('ingest.token', null);
+    const enabled = await getMeta('ingest.enabled', false);
+    ingestBox.innerHTML = token
+      ? `<label class="stack">Endpoint
+           <input type="text" readonly value="${escapeHtml(ingestUrl)}" onclick="this.select()" /></label>
+         <label class="stack">Your token
+           <input type="text" readonly value="${escapeHtml(token)}" onclick="this.select()" /></label>
+         <p class="hint">The automation should POST JSON:</p>
+         <pre class="ingest-body">{ "token": "${escapeHtml(token)}", "body": "&lt;notification text&gt;", "app": "&lt;app name&gt;" }</pre>
+         <label class="ingest-toggle">
+           <input type="checkbox" id="ingest-enabled"${enabled ? ' checked' : ''} />
+           <span>Pull forwarded messages into the inbox</span>
+         </label>
+         <p id="ingest-msg" class="hint"></p>
+         <button type="button" id="ingest-regen" class="link">Generate a new token</button>`
+      : `<button type="button" id="ingest-gen">Generate my token</button>`;
+
+    const enabledBox = root.querySelector('#ingest-enabled');
+    enabledBox?.addEventListener('change', () => setMeta('ingest.enabled', enabledBox.checked));
+    root.querySelector('#ingest-gen')?.addEventListener('click', generateToken);
+    root.querySelector('#ingest-regen')?.addEventListener('click', generateToken);
+  }
+
+  async function generateToken() {
+    const token = `${newId()}${newId()}`.replace(/-/g, '');
+    await setMeta('ingest.token', token);
+    // Register it server-side so the Edge Function can resolve it to this user.
+    // Best-effort: works once sync is set up and the migration is deployed.
+    if (isConfigured()) {
+      try {
+        const sb = supabase();
+        const user = await currentUser();
+        if (sb && user) await sb.from('ingest_tokens').upsert({ token, user_id: user.id, label: 'device' });
+      } catch {
+        /* table not deployed yet — the token is stored locally regardless */
+      }
+    }
+    await refreshIngest();
+    const msg = root.querySelector('#ingest-msg');
+    if (msg) {
+      msg.className = 'ok';
+      msg.textContent = 'Token ready. Now point your automation app at the endpoint above.';
+    }
+  }
+
+  /* Recurring schedules. A plain array in meta. */
+  const schedList = root.querySelector('#sched-list');
+  const schedCat = root.querySelector('#sched-cat');
+  const schedMsg = root.querySelector('#sched-msg');
+  const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+  schedCat.innerHTML =
+    '<option value="">no category</option>' +
+    CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+
+  async function refreshSchedules() {
+    const schedules = await getMeta('schedules', []);
+    schedList.innerHTML = schedules.length
+      ? schedules
+          .map(
+            (s) => `<div class="rule-row">
+              <span class="rule-desc"><b>${escapeHtml(s.name)}</b> · ${formatMinor(s.amountMinor)} · ${
+                s.cadence
+              }<br><small>next ${DATE.format(new Date(s.nextDue))}${
+                s.category ? ` · ${escapeHtml(s.category)}` : ''
+              }</small></span>
+              <button type="button" class="link" data-del-sched="${s.id}">Remove</button>
+            </div>`
+          )
+          .join('')
+      : '<p class="hint">Nothing recurring yet.</p>';
+  }
+
+  schedList.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-del-sched]')?.dataset.delSched;
+    if (!id) return;
+    const schedules = await getMeta('schedules', []);
+    await setMeta('schedules', schedules.filter((s) => s.id !== id));
+    await refreshSchedules();
+  });
+
+  root.querySelector('#add-sched').addEventListener('click', async () => {
+    const name = root.querySelector('#sched-name').value.trim();
+    const amountMinor = toMinor(root.querySelector('#sched-amt').value);
+    const due = root.querySelector('#sched-due').value;
+    if (!name || amountMinor === null || amountMinor <= 0 || !due) {
+      schedMsg.className = 'warn';
+      schedMsg.textContent = 'Give it a name, an amount, and a first due date.';
+      return;
+    }
+    const schedules = await getMeta('schedules', []);
+    schedules.push({
+      id: newId(),
+      name,
+      amountMinor,
+      direction: root.querySelector('#sched-dir').value === 'in' ? 'in' : 'out',
+      category: schedCat.value || null,
+      cadence: root.querySelector('#sched-cadence').value,
+      // Fire in the morning of the due day rather than at midnight.
+      nextDue: new Date(`${due}T09:00:00`).toISOString(),
+    });
+    await setMeta('schedules', schedules);
+    root.querySelector('#sched-name').value = '';
+    root.querySelector('#sched-amt').value = '';
+    root.querySelector('#sched-due').value = '';
+    schedMsg.className = 'ok';
+    schedMsg.textContent = 'Added.';
+    await refreshSchedules();
+  });
+
+  /* Capture rules. A plain array in meta: { id, match, category }. */
+  const rulesList = root.querySelector('#rules-list');
+  const ruleMatch = root.querySelector('#rule-match');
+  const ruleCat = root.querySelector('#rule-cat');
+  ruleCat.innerHTML = CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+
+  async function refreshRules() {
+    const rules = await getMeta('capture.rules', []);
+    rulesList.innerHTML = rules.length
+      ? rules
+          .map(
+            (r) => `<div class="rule-row">
+              <span class="rule-desc">“${escapeHtml(r.match)}” → <b>${escapeHtml(r.category)}</b></span>
+              <button type="button" class="link" data-del="${r.id}">Remove</button>
+            </div>`
+          )
+          .join('')
+      : '<p class="hint">No rules yet.</p>';
+  }
+
+  rulesList.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-del]')?.dataset.del;
+    if (!id) return;
+    const rules = await getMeta('capture.rules', []);
+    await setMeta('capture.rules', rules.filter((r) => r.id !== id));
+    await refreshRules();
+  });
+
+  root.querySelector('#add-rule').addEventListener('click', async () => {
+    const m = ruleMatch.value.trim().toLowerCase();
+    if (!m) return;
+    const rules = await getMeta('capture.rules', []);
+    if (!rules.some((r) => r.match === m && r.category === ruleCat.value)) {
+      await setMeta('capture.rules', [...rules, { id: newId(), match: m, category: ruleCat.value }]);
+    }
+    ruleMatch.value = '';
+    await refreshRules();
+  });
+
+  /* Category budgets. Stored as { [category]: capMinor }; a blank box means no
+   * cap and is simply left out of the map. */
+  const catBudgetsBox = root.querySelector('#cat-budgets');
+  const catBudgetMsg = root.querySelector('#cat-budget-msg');
+
+  async function refreshCatBudgets() {
+    const budgets = await getMeta('budget.categories', {});
+    catBudgetsBox.innerHTML = SPEND_CATEGORIES.map(
+      (cat) => `<label class="stack">${cat}
+        <input type="text" inputmode="decimal" data-cat="${cat}" placeholder="no cap"
+          value="${budgets[cat] ? budgets[cat] / 100 : ''}" /></label>`
+    ).join('');
+  }
+
+  root.querySelector('#save-cat-budgets').addEventListener('click', async () => {
+    const next = {};
+    let bad = false;
+    for (const input of catBudgetsBox.querySelectorAll('input[data-cat]')) {
+      const value = input.value.trim();
+      if (!value) continue;
+      const minor = toMinor(value);
+      if (minor === null || minor <= 0) {
+        bad = true;
+        continue;
+      }
+      next[input.dataset.cat] = minor;
+    }
+    await setMeta('budget.categories', next);
+    const count = Object.keys(next).length;
+    catBudgetMsg.className = bad ? 'warn' : 'ok';
+    catBudgetMsg.textContent = bad
+      ? 'Saved the valid ones; some boxes were not numbers.'
+      : count
+        ? `Saved ${count} budget${count === 1 ? '' : 's'}.`
+        : 'Cleared all budgets.';
+  });
+
   async function refreshAccount() {
     if (!isConfigured()) {
       account.innerHTML =
@@ -433,7 +692,17 @@ export async function renderSettings(root) {
     await refreshStats();
   });
 
-  await Promise.all([refreshStats(), refreshAccount(), refreshBudget(), refreshGoal(), refreshRecon()]);
+  await Promise.all([
+    refreshStats(),
+    refreshAccount(),
+    refreshBudget(),
+    refreshGoal(),
+    refreshRecon(),
+    refreshCatBudgets(),
+    refreshRules(),
+    refreshSchedules(),
+    refreshIngest(),
+  ]);
 }
 
 function pad(n, w = 2) {

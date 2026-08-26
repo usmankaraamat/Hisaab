@@ -416,6 +416,32 @@ export function categoryTotals(rows, { from = null, to = null, includeNonSpend =
 }
 
 /**
+ * Per-category budget progress for a window. Spent comes from the same
+ * `categoryTotals` the breakdown uses, so a budget row and its category bar can
+ * never disagree. Only categories with a set cap are returned, most-consumed
+ * fraction first, so the one about to blow through leads.
+ *
+ * @param budgets  `{ [category]: capMinor }`
+ */
+export function categoryBudgets(rows, budgets, { from = null, to = null } = {}) {
+  const spent = new Map(categoryTotals(rows, { from, to }).map((c) => [c.category, c.totalMinor]));
+  return Object.entries(budgets || {})
+    .filter(([, cap]) => Number(cap) > 0)
+    .map(([category, capMinor]) => {
+      const spentMinor = spent.get(category) || 0;
+      return {
+        category,
+        spentMinor,
+        budgetMinor: Number(capMinor),
+        remainingMinor: Number(capMinor) - spentMinor,
+        pct: Math.round((spentMinor / Number(capMinor)) * 100),
+        over: spentMinor > Number(capMinor),
+      };
+    })
+    .sort((a, b) => b.pct - a.pct);
+}
+
+/**
  * The burn-down: cumulative spend across the days of a period, against an even
  * "ideal" burn of the whole spendable envelope. It answers a question the daily
  * allowance only lets you infer — am I ahead of pace or behind?
