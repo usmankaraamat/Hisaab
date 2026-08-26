@@ -21,6 +21,7 @@
 import { allTransactions, getMeta } from '../db/local.js';
 import { budgetSummary, categoryTotals, categoryBudgets, spendPace, ON_OTHERS } from '../lib/budget.js';
 import { savingsPot } from '../lib/trends.js';
+import { answerQuery } from '../lib/query.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
 import { bridgeLayout, linePoints, gridLines, ceilNice, FRAME } from '../lib/chart.js';
 import { formatMinor } from '../lib/money.js';
@@ -52,6 +53,7 @@ export async function renderSpending(root) {
 
   host.innerHTML = [
     leftCard(budget),
+    askCard(),
     bridgeCard(budget),
     paceCard(rows, budget, now),
     categoryBudgetsCard(rows, budget, budgets),
@@ -68,6 +70,54 @@ export async function renderSpending(root) {
   const breakdownHost = host.querySelector('#breakdown-card');
   const range = { from: toDateInput(budget.since), to: '' };
   paintBreakdown(breakdownHost, rows, budget, range);
+
+  wireAsk(host, rows, now);
+}
+
+/**
+ * A one-line question box over the local ledger — offline, private, no model.
+ * It answers the handful of things people actually ask ("how much on eating out
+ * last month", "who owes me the most") and, when the answer is a filtered total,
+ * offers to open exactly those entries.
+ */
+function askCard() {
+  return `<div class="card ask" id="ask-card">
+    <h3>Ask</h3>
+    <form id="ask-form" autocomplete="off">
+      <input id="ask-q" type="text" placeholder="how much on eating out last month?"
+        spellcheck="false" aria-label="Ask about your spending" />
+      <button type="submit">Ask</button>
+    </form>
+    <p class="ask-a" id="ask-a" hidden></p>
+  </div>`;
+}
+
+function wireAsk(host, rows, now) {
+  const form = host.querySelector('#ask-form');
+  const input = host.querySelector('#ask-q');
+  const out = host.querySelector('#ask-a');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const a = answerQuery(input.value, rows, { now });
+    out.hidden = false;
+    out.textContent = a.text;
+    if (a.category || a.person || a.from) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'link ask-link';
+      link.textContent = a.person ? 'See the ledger' : 'See the entries';
+      link.addEventListener('click', () => {
+        if (a.person) return go('ledger');
+        const params = {};
+        if (a.category) params.cat = a.category;
+        if (a.from) params.from = toDateInput(a.from);
+        if (a.to) params.to = toDateInput(a.to);
+        go('history', params);
+      });
+      out.append(' ');
+      out.append(link);
+    }
+  });
 }
 
 /** ISO instant -> the "YYYY-MM-DD" a date input expects, in local time. */

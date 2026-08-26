@@ -976,6 +976,20 @@ label.stack input {
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
 
+/* Ask box on the Spending tab. */
+.ask #ask-form { display: flex; gap: 8px; }
+.ask #ask-q {
+  flex: 1; min-width: 0; padding: 10px 12px; font: inherit;
+  color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.ask #ask-form button {
+  padding: 10px 16px; font: inherit; font-weight: 600; color: var(--bg);
+  background: var(--accent); border: 1px solid var(--accent); border-radius: 10px; cursor: pointer;
+}
+.ask-a { margin: 12px 2px 0; font-size: .95rem; }
+.ask-link { margin-left: 4px; }
+
 /* Recurring schedule inputs in Settings. */
 .sched-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .sched-add #sched-name { grid-column: 1 / -1; }

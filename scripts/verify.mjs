@@ -37,6 +37,7 @@ import { rankSuggestions } from '../src/capture/predict.js';
 import { parseNotification } from '../src/capture/notif.js';
 import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
 import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
+import { answerQuery } from '../src/lib/query.js';
 import {
   rideSurge,
   priceIndex,
@@ -400,6 +401,22 @@ check('the closest to its cap leads', cb[0].category, 'Groceries');
 check('a category with no spend still shows its cap',
   cb.find((c) => c.category === 'Rent').spentMinor, 0);
 check('a zero cap is ignored', categoryBudgets(budgetRows, { Groceries: 0 }).length, 0);
+
+console.log('\n--- ask (local natural-language answers) ---');
+const qrows = [
+  spend({ raw_name: 'Salary', direction: 'in', amount_minor: 10000000, category: 'Income', occurred_at: '2026-08-03T13:00:00.000Z' }),
+  spend({ raw_name: 'chicken', amount_minor: 100000, category: 'Groceries', occurred_at: '2026-08-05T10:00:00.000Z' }),
+  spend({ raw_name: 'burger', amount_minor: 150000, category: 'Eating Out', occurred_at: '2026-08-05T10:00:00.000Z' }),
+  spend({ raw_name: 'old dinner', amount_minor: 50000, category: 'Eating Out', occurred_at: '2026-07-15T10:00:00.000Z' }),
+  spend({ raw_name: 'lent to Sara', amount_minor: 120000, category: 'Groceries', counterparty_name: 'Sara', ledger_effect: 'lent', occurred_at: '2026-08-04T10:00:00.000Z' }),
+];
+const ask = (question) => answerQuery(question, qrows, { now: asOfAug8 });
+check('a category question, this month', ask('how much on eating out this month').amountMinor, 150000);
+check('a category question, last month', ask('how much did I spend on eating out last month').amountMinor, 50000);
+check('total spend excludes what is still owed', ask('how much did I spend this month').amountMinor, 250000);
+check('the biggest category', ask('what was my biggest category this month').category, 'Eating Out');
+check('who owes me the most', ask('who owes me the most').person, 'Sara');
+check('how much a person owes', ask('how much does Sara owe').text, 'Sara owes you Rs 1,200.');
 
 console.log('\n--- the period is the calendar month, and reconciling does not move it ---');
 
