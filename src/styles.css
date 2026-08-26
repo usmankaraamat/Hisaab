@@ -972,6 +972,24 @@ label.stack input {
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
 
+/* Capture rules in Settings. */
+.rule-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.rule-desc { overflow: hidden; text-overflow: ellipsis; }
+.rule-add { display: flex; gap: 8px; margin-top: 10px; }
+.rule-add input { flex: 1; min-width: 0; }
+.rule-add input, .rule-add select {
+  padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.rule-add button {
+  padding: 9px 16px; font: inherit; font-weight: 600; color: var(--bg);
+  background: var(--accent); border: 1px solid var(--accent); border-radius: 10px; cursor: pointer;
+}
+
+/* "Remember this category" in the History editor. */
+.h-remember { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: .84rem; color: var(--muted); }
+.h-remember input { width: auto; margin: 0; }
+
 /* Category budget inputs in Settings. */
 .cat-budgets { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-bottom: 8px; }
 .cat-budgets label.stack { margin: 6px 0 2px; }

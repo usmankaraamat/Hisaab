@@ -8,10 +8,11 @@ import {
   resetAll,
   getMeta,
   setMeta,
+  newId,
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
-import { SPEND_CATEGORIES } from '../lib/categories.js';
+import { SPEND_CATEGORIES, CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
@@ -77,6 +78,21 @@ export async function renderSettings(root) {
         <div class="cat-budgets" id="cat-budgets"></div>
         <p id="cat-budget-msg" class="hint"></p>
         <button type="button" id="save-cat-budgets">Save budgets</button>
+      </div>
+
+      <div class="card">
+        <h3>Capture rules</h3>
+        <p class="hint">
+          Anything you type containing the match text is filed under its category at capture,
+          before the model runs. Add one here, or tap “remember” when you fix a category in
+          History.
+        </p>
+        <div id="rules-list"></div>
+        <div class="rule-add">
+          <input type="text" id="rule-match" placeholder="e.g. indrive" spellcheck="false" />
+          <select id="rule-cat"></select>
+          <button type="button" id="add-rule">Add</button>
+        </div>
       </div>
 
       <div class="card">
@@ -300,6 +316,45 @@ export async function renderSettings(root) {
     budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
 
+  /* Capture rules. A plain array in meta: { id, match, category }. */
+  const rulesList = root.querySelector('#rules-list');
+  const ruleMatch = root.querySelector('#rule-match');
+  const ruleCat = root.querySelector('#rule-cat');
+  ruleCat.innerHTML = CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+
+  async function refreshRules() {
+    const rules = await getMeta('capture.rules', []);
+    rulesList.innerHTML = rules.length
+      ? rules
+          .map(
+            (r) => `<div class="rule-row">
+              <span class="rule-desc">“${escapeHtml(r.match)}” → <b>${escapeHtml(r.category)}</b></span>
+              <button type="button" class="link" data-del="${r.id}">Remove</button>
+            </div>`
+          )
+          .join('')
+      : '<p class="hint">No rules yet.</p>';
+  }
+
+  rulesList.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-del]')?.dataset.del;
+    if (!id) return;
+    const rules = await getMeta('capture.rules', []);
+    await setMeta('capture.rules', rules.filter((r) => r.id !== id));
+    await refreshRules();
+  });
+
+  root.querySelector('#add-rule').addEventListener('click', async () => {
+    const m = ruleMatch.value.trim().toLowerCase();
+    if (!m) return;
+    const rules = await getMeta('capture.rules', []);
+    if (!rules.some((r) => r.match === m && r.category === ruleCat.value)) {
+      await setMeta('capture.rules', [...rules, { id: newId(), match: m, category: ruleCat.value }]);
+    }
+    ruleMatch.value = '';
+    await refreshRules();
+  });
+
   /* Category budgets. Stored as { [category]: capMinor }; a blank box means no
    * cap and is simply left out of the map. */
   const catBudgetsBox = root.querySelector('#cat-budgets');
@@ -489,6 +544,7 @@ export async function renderSettings(root) {
     refreshGoal(),
     refreshRecon(),
     refreshCatBudgets(),
+    refreshRules(),
   ]);
 }
 

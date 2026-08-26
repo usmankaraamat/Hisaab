@@ -20,6 +20,7 @@ import {
   getMeta,
 } from '../db/local.js';
 import { parseNotification } from './notif.js';
+import { matchRule, ruleFields } from '../lib/rules.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
 import { syncNow } from '../db/sync.js';
@@ -125,6 +126,20 @@ export async function renderAdd(root) {
   // The split shown in the preview, and whether the user has overridden it.
   let plan = null;
   let splitOverride = null;
+  // Deterministic capture rules, applied to plain entries before the model runs.
+  let rules = [];
+
+  /* If a rule matches, set its category outright and mark the row done so the
+   * enrichment pass leaves it alone. Splits are exempt: they already carry a
+   * stated meaning. Returns the input, mutated. */
+  function applyRule(input) {
+    const fields = ruleFields(matchRule(rules, input.raw_name));
+    if (fields) {
+      input.category = fields.category;
+      input.enriched_at = new Date().toISOString();
+    }
+    return input;
+  }
 
   function currentParse() {
     const parsed = parseEntry(input.value);
@@ -574,12 +589,14 @@ export async function renderAdd(root) {
             { source_text: it.name }
           );
         } else {
-          await addTransaction({
-            raw_name: it.name,
-            amount_minor: it.amtMinor,
-            direction: p.direction,
-            occurred_at: p.occurred_at,
-          });
+          await addTransaction(
+            applyRule({
+              raw_name: it.name,
+              amount_minor: it.amtMinor,
+              direction: p.direction,
+              occurred_at: p.occurred_at,
+            })
+          );
         }
       }
 
@@ -664,6 +681,7 @@ export async function renderAdd(root) {
 
   async function refreshAll() {
     history = await allTransactions();
+    rules = await getMeta('capture.rules', []);
     people = [...new Set(history.map((r) => r.counterparty_name).filter(Boolean))];
     refreshSpendTiles();
     await Promise.all([
@@ -690,7 +708,7 @@ export async function renderAdd(root) {
 
     const written = commit
       ? await addTransactions(commit.rows, { source_text: name })
-      : [await addTransaction({ raw_name: name, amount_minor: amountMinor, direction: dir })];
+      : [await addTransaction(applyRule({ raw_name: name, amount_minor: amountMinor, direction: dir }))];
 
     input.value = '';
     setDirection('out', { silent: true });

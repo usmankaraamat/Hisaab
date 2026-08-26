@@ -151,6 +151,10 @@ function makeTransaction({
   split_group_id = null,
   split_size = null,
   source_text = null,
+  // A deterministic capture rule (or a manual correction) can set the category
+  // outright and mark the row done, so the model never overrides it.
+  enriched_at = null,
+  enriched = 0,
 }) {
   const now = new Date().toISOString();
   return {
@@ -177,14 +181,14 @@ function makeTransaction({
     item_id: null,
     route_id: null,
     counterparty_id: null,
-    enriched_at: null,
+    enriched_at,
     enrichment_version: 0,
 
     created_at: now,
     updated_at: now,
     deleted: 0,
     synced: 0,
-    enriched: 0,
+    enriched: enriched_at ? 1 : enriched,
   };
 }
 

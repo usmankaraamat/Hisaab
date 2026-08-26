@@ -35,6 +35,7 @@ import {
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions } from '../src/capture/predict.js';
 import { parseNotification } from '../src/capture/notif.js';
+import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
 import {
   rideSurge,
   priceIndex,
@@ -350,6 +351,20 @@ check('savings never appears as a spending category',
   cats.some((c) => c.category === 'Savings'), false);
 check('an uncategorised row is reported, not dropped',
   categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
+
+console.log('\n--- capture rules ---');
+const ruleset = [
+  { id: '1', match: 'indrive', category: 'Rides' },
+  { id: '2', match: 'k-electric', category: 'Utilities' },
+];
+check('a rule matches on a contained word',
+  matchRule(ruleset, 'Indrive Home-Office')?.category, 'Rides');
+check('matching is case-insensitive', matchRule(ruleset, 'INDRIVE flat')?.category, 'Rides');
+check('an unmatched name yields no rule', matchRule(ruleset, 'chicken karahi'), null);
+check('the first matching rule wins',
+  matchRule([{ match: 'a', category: 'X' }, { match: 'app', category: 'Y' }], 'apple')?.category, 'X');
+check('a rule contributes only a category', ruleFields(ruleset[0]), { category: 'Rides' });
+check('a suggested match is the first word', suggestMatch('Indrive Home-Office'), 'indrive');
 
 console.log('\n--- per-category budgets ---');
 const budgetRows = [
