@@ -976,6 +976,17 @@ label.stack input {
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
 
+/* Auto-capture setup in Settings. */
+.ingest-body {
+  margin: 6px 0 10px; padding: 10px 12px; overflow-x: auto;
+  font: .74rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; white-space: pre;
+}
+.ingest-toggle { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: .88rem; }
+.ingest-toggle input { width: auto; }
+#ingest-box input[readonly] { color: var(--muted); }
+
 /* Ask box on the Spending tab. */
 .ask #ask-form { display: flex; gap: 8px; }
 .ask #ask-q {

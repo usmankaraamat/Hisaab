@@ -7,6 +7,7 @@ import { renderLedger } from './views/ledger.js';
 import { renderSpending } from './views/spending.js';
 import { renderOverview } from './views/overview.js';
 import { startAutoSync } from './db/sync.js';
+import { pullInbox } from './db/ingest.js';
 import { setMeta, addPending } from './db/local.js';
 import { parseNotification } from './capture/notif.js';
 import { invalidate } from './capture/predict.js';
@@ -63,6 +64,12 @@ async function handleShare() {
 await handleShare();
 show();
 
+// Auto-capture: pull any forwarded notifications on load. Gated + best-effort
+// inside pullInbox, so this is a no-op unless the user has set it up.
+pullInbox().then((r) => {
+  if (r?.pulled && parseHash().name === 'add') show();
+});
+
 // Sync runs entirely off the capture path — a failure here must never surface
 // as an error on the Add screen.
 startAutoSync(async (result) => {
@@ -72,6 +79,9 @@ startAutoSync(async (result) => {
     invalidate();
     if (parseHash().name !== 'settings') await show();
   }
+  // Piggyback the inbox pull on the same cadence as sync.
+  const ingest = await pullInbox().catch(() => null);
+  if (ingest?.pulled && parseHash().name === 'add') await show();
 });
 
 // sw.js lives in public/, so it is served from the deploy base — not from the

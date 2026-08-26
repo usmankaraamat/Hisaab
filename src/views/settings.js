@@ -14,7 +14,7 @@ import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
 import { SPEND_CATEGORIES, CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
-import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
+import { isConfigured, currentUser, signIn, signOut, supabase } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
 import { escapeHtml } from '../capture/entry.js';
 
@@ -136,6 +136,17 @@ export async function renderSettings(root) {
         </label>
         <p id="recon-msg" class="hint"></p>
         <button type="button" id="do-recon">Reconcile</button>
+      </div>
+
+      <div class="card">
+        <h3>Auto-capture <small>(advanced)</small></h3>
+        <p class="hint">
+          Forward payment notifications automatically. An automation app on your phone
+          (MacroDroid, Tasker, HTTP Shortcuts) posts each notification to your private
+          endpoint; the app turns them into “To be resolved” items. One-time setup — see
+          <code>docs/auto-capture.md</code>. Paste and share both work with no setup.
+        </p>
+        <div id="ingest-box"></div>
       </div>
 
       <div class="card">
@@ -343,6 +354,58 @@ export async function renderSettings(root) {
     budgetMsg.className = 'ok';
     budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
+
+  /* Auto-capture. A per-user token the phone automation carries; the client
+   * pulls forwarded messages when enabled. All best-effort — the feature is a
+   * convenience over manual paste, never a dependency. */
+  const ingestBox = root.querySelector('#ingest-box');
+  const ingestUrl = `${import.meta.env.VITE_SUPABASE_URL || '<your Supabase URL>'}/functions/v1/ingest`;
+
+  async function refreshIngest() {
+    const token = await getMeta('ingest.token', null);
+    const enabled = await getMeta('ingest.enabled', false);
+    ingestBox.innerHTML = token
+      ? `<label class="stack">Endpoint
+           <input type="text" readonly value="${escapeHtml(ingestUrl)}" onclick="this.select()" /></label>
+         <label class="stack">Your token
+           <input type="text" readonly value="${escapeHtml(token)}" onclick="this.select()" /></label>
+         <p class="hint">The automation should POST JSON:</p>
+         <pre class="ingest-body">{ "token": "${escapeHtml(token)}", "body": "&lt;notification text&gt;", "app": "&lt;app name&gt;" }</pre>
+         <label class="ingest-toggle">
+           <input type="checkbox" id="ingest-enabled"${enabled ? ' checked' : ''} />
+           <span>Pull forwarded messages into the inbox</span>
+         </label>
+         <p id="ingest-msg" class="hint"></p>
+         <button type="button" id="ingest-regen" class="link">Generate a new token</button>`
+      : `<button type="button" id="ingest-gen">Generate my token</button>`;
+
+    const enabledBox = root.querySelector('#ingest-enabled');
+    enabledBox?.addEventListener('change', () => setMeta('ingest.enabled', enabledBox.checked));
+    root.querySelector('#ingest-gen')?.addEventListener('click', generateToken);
+    root.querySelector('#ingest-regen')?.addEventListener('click', generateToken);
+  }
+
+  async function generateToken() {
+    const token = `${newId()}${newId()}`.replace(/-/g, '');
+    await setMeta('ingest.token', token);
+    // Register it server-side so the Edge Function can resolve it to this user.
+    // Best-effort: works once sync is set up and the migration is deployed.
+    if (isConfigured()) {
+      try {
+        const sb = supabase();
+        const user = await currentUser();
+        if (sb && user) await sb.from('ingest_tokens').upsert({ token, user_id: user.id, label: 'device' });
+      } catch {
+        /* table not deployed yet — the token is stored locally regardless */
+      }
+    }
+    await refreshIngest();
+    const msg = root.querySelector('#ingest-msg');
+    if (msg) {
+      msg.className = 'ok';
+      msg.textContent = 'Token ready. Now point your automation app at the endpoint above.';
+    }
+  }
 
   /* Recurring schedules. A plain array in meta. */
   const schedList = root.querySelector('#sched-list');
@@ -638,6 +701,7 @@ export async function renderSettings(root) {
     refreshCatBudgets(),
     refreshRules(),
     refreshSchedules(),
+    refreshIngest(),
   ]);
 }
 
