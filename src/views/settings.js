@@ -11,6 +11,7 @@ import {
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
+import { SPEND_CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
@@ -65,6 +66,17 @@ export async function renderSettings(root) {
         <p id="goal-msg" class="hint"></p>
         <button type="button" id="save-goal">Save goal</button>
         <button type="button" id="clear-goal">Clear</button>
+      </div>
+
+      <div class="card">
+        <h3>Category budgets</h3>
+        <p class="hint">
+          A monthly cap per category. The Spending tab shows how much of each is left this
+          period, and flags any you go over. Leave a box blank for no cap.
+        </p>
+        <div class="cat-budgets" id="cat-budgets"></div>
+        <p id="cat-budget-msg" class="hint"></p>
+        <button type="button" id="save-cat-budgets">Save budgets</button>
       </div>
 
       <div class="card">
@@ -288,6 +300,43 @@ export async function renderSettings(root) {
     budgetMsg.textContent = 'Cleared. Counting from the start of the month.';
   });
 
+  /* Category budgets. Stored as { [category]: capMinor }; a blank box means no
+   * cap and is simply left out of the map. */
+  const catBudgetsBox = root.querySelector('#cat-budgets');
+  const catBudgetMsg = root.querySelector('#cat-budget-msg');
+
+  async function refreshCatBudgets() {
+    const budgets = await getMeta('budget.categories', {});
+    catBudgetsBox.innerHTML = SPEND_CATEGORIES.map(
+      (cat) => `<label class="stack">${cat}
+        <input type="text" inputmode="decimal" data-cat="${cat}" placeholder="no cap"
+          value="${budgets[cat] ? budgets[cat] / 100 : ''}" /></label>`
+    ).join('');
+  }
+
+  root.querySelector('#save-cat-budgets').addEventListener('click', async () => {
+    const next = {};
+    let bad = false;
+    for (const input of catBudgetsBox.querySelectorAll('input[data-cat]')) {
+      const value = input.value.trim();
+      if (!value) continue;
+      const minor = toMinor(value);
+      if (minor === null || minor <= 0) {
+        bad = true;
+        continue;
+      }
+      next[input.dataset.cat] = minor;
+    }
+    await setMeta('budget.categories', next);
+    const count = Object.keys(next).length;
+    catBudgetMsg.className = bad ? 'warn' : 'ok';
+    catBudgetMsg.textContent = bad
+      ? 'Saved the valid ones; some boxes were not numbers.'
+      : count
+        ? `Saved ${count} budget${count === 1 ? '' : 's'}.`
+        : 'Cleared all budgets.';
+  });
+
   async function refreshAccount() {
     if (!isConfigured()) {
       account.innerHTML =
@@ -433,7 +482,14 @@ export async function renderSettings(root) {
     await refreshStats();
   });
 
-  await Promise.all([refreshStats(), refreshAccount(), refreshBudget(), refreshGoal(), refreshRecon()]);
+  await Promise.all([
+    refreshStats(),
+    refreshAccount(),
+    refreshBudget(),
+    refreshGoal(),
+    refreshRecon(),
+    refreshCatBudgets(),
+  ]);
 }
 
 function pad(n, w = 2) {

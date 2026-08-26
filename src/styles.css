@@ -19,6 +19,7 @@
   --c-pos: #16a34a;   /* under budget · income · money coming back */
   --c-neg: #dc2626;   /* over budget · a rise · a deficit */
   --c-info: #2a78d6;  /* second series (spend, against income) */
+  --c-warn: #d98a00;  /* nearing a limit — reserved status, theme-invariant-ish */
   --c-grid: var(--line);
 }
 
@@ -970,6 +971,24 @@ label.stack input {
 .dv-label { fill: var(--text); font-size: 9px; font-family: inherit; }
 .dv-value { fill: var(--muted); font-size: 9px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .dv-sub { fill: var(--muted); font-size: 8px; font-family: inherit; }
+
+/* Category budget inputs in Settings. */
+.cat-budgets { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-bottom: 8px; }
+.cat-budgets label.stack { margin: 6px 0 2px; }
+
+/* Per-category budgets. */
+.buds { display: flex; flex-direction: column; gap: 14px; }
+.bud { text-align: left; cursor: pointer; }
+.bud-head { display: flex; justify-content: space-between; gap: 12px; font-size: .92rem; }
+.bud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bud-head .num { white-space: nowrap; }
+.bud-cap { color: var(--muted); font-weight: 400; }
+.bud-bar { display: block; height: 8px; margin: 5px 0 3px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.bud-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bud-bar.near > span { background: var(--c-warn); }
+.bud-bar.over > span { background: var(--c-neg); }
+.bud-sub { color: var(--muted); font-size: .76rem; }
+.bud-sub.over { color: var(--danger); font-weight: 600; }
 
 /* Sparklines that sit beside a number. */
 .spark { display: block; overflow: visible; }

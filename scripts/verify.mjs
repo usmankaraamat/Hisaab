@@ -22,7 +22,7 @@ import { formatMinor } from '../src/lib/money.js';
 import { parseRoute, groupKey, displayName, templateText } from '../src/capture/normalize.js';
 import { planEntry } from '../src/capture/split.js';
 import { balances, ledgerTotals } from '../src/lib/ledger.js';
-import { budgetSummary, categoryTotals, calendarPeriod, spendPace, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
+import { budgetSummary, categoryTotals, categoryBudgets, calendarPeriod, spendPace, ON_OTHERS, RECONCILE } from '../src/lib/budget.js';
 import { findDuplicate } from '../src/lib/dupes.js';
 import {
   barLayout, gridLines, ceilNice, shortMinor, FRAME,
@@ -350,6 +350,23 @@ check('savings never appears as a spending category',
   cats.some((c) => c.category === 'Savings'), false);
 check('an uncategorised row is reported, not dropped',
   categoryTotals([spend({ amount_minor: 700 })])[0].category, 'Uncategorised');
+
+console.log('\n--- per-category budgets ---');
+const budgetRows = [
+  spend({ raw_name: 'chicken', amount_minor: 120000, category: 'Groceries' }),
+  spend({ raw_name: 'more groceries', amount_minor: 40000, category: 'Groceries' }),
+  spend({ raw_name: 'burger', amount_minor: 90000, category: 'Eating Out' }),
+];
+const cb = categoryBudgets(budgetRows, { Groceries: 100000, 'Eating Out': 200000, Rent: 5000000 });
+check('a budget reports what is spent against it',
+  cb.find((c) => c.category === 'Groceries').spentMinor, 160000);
+check('and flags going over', cb.find((c) => c.category === 'Groceries').over, true);
+check('an under-budget category is not over',
+  cb.find((c) => c.category === 'Eating Out').over, false);
+check('the closest to its cap leads', cb[0].category, 'Groceries');
+check('a category with no spend still shows its cap',
+  cb.find((c) => c.category === 'Rent').spentMinor, 0);
+check('a zero cap is ignored', categoryBudgets(budgetRows, { Groceries: 0 }).length, 0);
 
 console.log('\n--- the period is the calendar month, and reconciling does not move it ---');
 

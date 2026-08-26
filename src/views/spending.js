@@ -19,7 +19,7 @@
  */
 
 import { allTransactions, getMeta } from '../db/local.js';
-import { budgetSummary, categoryTotals, spendPace, ON_OTHERS } from '../lib/budget.js';
+import { budgetSummary, categoryTotals, categoryBudgets, spendPace, ON_OTHERS } from '../lib/budget.js';
 import { savingsPot } from '../lib/trends.js';
 import { rideSurge, priceIndex } from '../lib/insights.js';
 import { bridgeLayout, linePoints, gridLines, ceilNice, FRAME } from '../lib/chart.js';
@@ -33,10 +33,11 @@ export async function renderSpending(root) {
   root.innerHTML = '<section class="spending"><h2>Spending</h2><div id="spend-body"></div></section>';
   const host = root.querySelector('#spend-body');
 
-  const [rows, opening, target] = await Promise.all([
+  const [rows, opening, target, budgets] = await Promise.all([
     allTransactions(),
     getMeta('budget.opening', null),
     getMeta('budget.savingsTarget', 0),
+    getMeta('budget.categories', {}),
   ]);
 
   if (!rows.length) {
@@ -53,6 +54,7 @@ export async function renderSpending(root) {
     leftCard(budget),
     bridgeCard(budget),
     paceCard(rows, budget, now),
+    categoryBudgetsCard(rows, budget, budgets),
     '<div class="card" id="breakdown-card"></div>',
     committedCard(budget),
     faresCard(rows),
@@ -234,6 +236,47 @@ function bridgeCard(b) {
        ${connectors}${rects}
      </svg>`,
     'Your cash, less what is already spoken for, is what is safe to spend.'
+  );
+}
+
+/**
+ * Per-category budgets for this period. A single safe-to-spend number cannot say
+ * "you set aside 8,000 for Eating Out and you are already at 9,200"; this can.
+ * Over-budget rows are the reserved critical colour with an explicit "over by"
+ * label, so the alert never rests on colour alone.
+ */
+function categoryBudgetsCard(rows, b, budgets) {
+  if (b.anchoredTo === 'none') return '';
+  const list = categoryBudgets(rows, budgets, { from: b.since });
+  if (!list.length) return '';
+
+  const bars = list
+    .map((c) => {
+      const width = Math.min(100, c.pct);
+      const state = c.over ? 'over' : c.pct >= 80 ? 'near' : '';
+      const note = c.over
+        ? `over by ${formatMinor(-c.remainingMinor)}`
+        : `${formatMinor(c.remainingMinor)} left`;
+      return `<div class="bud" data-cat="${escapeHtml(c.category)}">
+        <div class="bud-head">
+          <span class="bud-name">${escapeHtml(c.category)}</span>
+          <span class="num">${formatMinor(c.spentMinor)} <span class="bud-cap">/ ${formatMinor(
+            c.budgetMinor
+          )}</span></span>
+        </div>
+        <span class="bud-bar ${state}"><span style="width:${width}%"></span></span>
+        <span class="bud-sub ${c.over ? 'over' : ''}">${c.pct}% · ${note}</span>
+      </div>`;
+    })
+    .join('');
+
+  const over = list.filter((c) => c.over).length;
+  return card(
+    'Budgets this period',
+    `<div class="buds">${bars}</div>`,
+    over
+      ? `${over} categor${over === 1 ? 'y is' : 'ies are'} over budget. Tap to see the entries.`
+      : 'Tap a category to see the entries.'
   );
 }
 
