@@ -28,19 +28,19 @@ import { parseNotification } from '../capture/notif.js';
  * upsert the first time and nothing at all afterwards; a failure leaves the
  * marker unset, so the next launch retries.
  *
- * @returns {'ok'|'signed-out'|'no-token'|'failed'}
+ * @returns {{state: 'ok'|'signed-out'|'no-token'|'failed', detail?: string}}
  */
 export async function ensureIngestToken() {
-  if (!isConfigured()) return 'signed-out';
+  if (!isConfigured()) return { state: 'signed-out' };
   const token = await getMeta('ingest.token', null);
-  if (!token) return 'no-token';
+  if (!token) return { state: 'no-token' };
 
-  const sb = supabase();
-  if (!sb) return 'signed-out';
+  const sb = await supabase();
+  if (!sb) return { state: 'signed-out' };
   const user = await currentUser();
-  if (!user) return 'signed-out';
+  if (!user) return { state: 'signed-out' };
 
-  if ((await getMeta('ingest.registered', null)) === `${user.id}:${token}`) return 'ok';
+  if ((await getMeta('ingest.registered', null)) === `${user.id}:${token}`) return { state: 'ok' };
 
   try {
     // Anything else registered for this account is a token no macro should be
@@ -50,11 +50,14 @@ export async function ensureIngestToken() {
     const { error } = await sb
       .from('ingest_tokens')
       .upsert({ token, user_id: user.id, label: 'device' });
-    if (error) return 'failed';
+    if (error) return { state: 'failed', detail: error.message };
     await setMeta('ingest.registered', `${user.id}:${token}`);
-    return 'ok';
-  } catch {
-    return 'failed';
+    return { state: 'ok' };
+  } catch (err) {
+    // Carried out rather than swallowed. Every failure here looks the same from
+    // the phone — a 401 in the macro's log — so the one place that knows what
+    // actually went wrong is the only place worth saying it.
+    return { state: 'failed', detail: err?.message || String(err) };
   }
 }
 
@@ -62,7 +65,7 @@ export async function pullInbox() {
   if (!isConfigured()) return { pulled: 0 };
   if (!(await getMeta('ingest.enabled', false))) return { pulled: 0 };
 
-  const sb = supabase();
+  const sb = await supabase();
   if (!sb) return { pulled: 0 };
   const user = await currentUser();
   if (!user) return { pulled: 0 };

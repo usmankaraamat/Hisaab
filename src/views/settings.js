@@ -398,17 +398,20 @@ Content-Type: text/plain
    * that shows it. A token the server has never seen looks identical here but
    * answers every macro with 401, and the macro cannot tell you why. */
   async function showTokenState() {
-    const state = await ensureIngestToken();
+    const { state, detail } = await ensureIngestToken();
     const line = root.querySelector('#ingest-state');
     if (!line) return;
     const said = {
       ok: ['ok', 'Registered — the endpoint will accept this token.'],
       'signed-out': ['warn', 'Not registered: sign in under Sync, then reopen this page. Until then every forwarded message comes back 401.'],
-      failed: ['warn', 'Could not reach the server to register this token. Forwarded messages will 401 until it does — reopen this page when you are online.'],
+      failed: ['warn', 'Could not register this token, so forwarded messages will 401 until it works. Reopen this page when you are online.'],
       'no-token': ['hint', ''],
     }[state] ?? ['hint', ''];
     line.className = said[0];
-    line.textContent = said[1];
+    // The underlying reason, when there is one. A generic "could not reach the
+    // server" sent the last round of debugging at the network and the macro,
+    // when the fault was in this file.
+    line.textContent = detail ? `${said[1]} (${detail})` : said[1];
   }
 
   async function generateToken() {
@@ -422,11 +425,11 @@ Content-Type: text/plain
      * that never reached the server looks identical on this screen and answers
      * every forwarded message with 401. */
     await setMeta('ingest.registered', null);
-    const state = await ensureIngestToken();
+    const { state, detail } = await ensureIngestToken();
     const registered = state === 'ok';
     const why = state === 'signed-out'
       ? 'Saved on this device, but sign in under Sync before it will work — an unregistered token is refused with 401.'
-      : 'Saved on this device, but the server could not be reached. Reopen this page when you are online.';
+      : `Saved on this device, but the server would not take it${detail ? `: ${detail}` : ''}. Reopen this page when you are online.`;
 
     await refreshIngest();
     const msg = root.querySelector('#ingest-msg');

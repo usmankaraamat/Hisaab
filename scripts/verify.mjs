@@ -11,7 +11,7 @@
  * root to get the full suite.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -1021,6 +1021,34 @@ check('a non-ride is never flagged', surgeCheck(rows, 'Chicken', 500000), null);
       '  The import, prediction and insight checks need the real export, which is\n' +
       '  personal data and stays out of the repo. Pure-logic checks above still ran.'
   );
+}
+
+/* A source-level check, because this one is invisible at runtime.
+ *
+ * `supabase()` lazily imports the SDK, so it returns a promise, not a client.
+ * Forget the `await` and the promise is still truthy — every `if (!sb)` guard
+ * passes — and `sb.from(...)` throws a TypeError into a catch written for
+ * network failures. Auto-capture shipped with exactly that in both of its
+ * functions: registering the token and pulling the inbox silently did nothing
+ * for days, and the only symptom was a 401 in a phone's log, three layers away
+ * from the cause.
+ *
+ * Nothing else here can catch it: it needs a browser, a session and a network,
+ * and it fails by doing nothing at all. So the shape is asserted in the text. */
+console.log('\n--- the lazy Supabase client is always awaited ---');
+{
+  const srcDir = join(here, '..', 'src');
+  const offenders = [];
+  for (const rel of readdirSync(srcDir, { recursive: true })) {
+    const name = String(rel).replace(/\\/g, '/');
+    if (!name.endsWith('.js') || name.endsWith('db/supabase.js')) continue;
+    const text = readFileSync(join(srcDir, name), 'utf8');
+    text.split(/\r?\n/).forEach((line, i) => {
+      const call = /(?<!await )\bsupabase\(\)/.test(line);
+      if (call && !/^\s*[*/]/.test(line)) offenders.push(`${name}:${i + 1}`);
+    });
+  }
+  check('every call site awaits supabase()', offenders, []);
 }
 
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nAll checks passed.');
