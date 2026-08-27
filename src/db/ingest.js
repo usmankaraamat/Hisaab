@@ -9,8 +9,54 @@
  * on. */
 
 import { supabase, isConfigured, currentUser } from './supabase.js';
-import { getMeta, addPending } from './local.js';
+import { getMeta, setMeta, addPending } from './local.js';
 import { parseNotification } from '../capture/notif.js';
+
+/**
+ * Make sure the token this device hands to its macros is the one the server
+ * knows about, and repair it if it is not.
+ *
+ * The token is generated on the device and registered separately, so the two
+ * halves can drift apart: generate it while signed out, or with no signal, and
+ * the phone is left holding a token the endpoint has never heard of. Every
+ * forwarded notification then comes back `401 unknown token` — from the macro's
+ * side indistinguishable from a misconfigured header, and there was nothing in
+ * the app that would ever try again.
+ *
+ * So registration is re-asserted rather than done once. `ingest.registered`
+ * remembers what has been confirmed for whom, which keeps this to a single
+ * upsert the first time and nothing at all afterwards; a failure leaves the
+ * marker unset, so the next launch retries.
+ *
+ * @returns {'ok'|'signed-out'|'no-token'|'failed'}
+ */
+export async function ensureIngestToken() {
+  if (!isConfigured()) return 'signed-out';
+  const token = await getMeta('ingest.token', null);
+  if (!token) return 'no-token';
+
+  const sb = supabase();
+  if (!sb) return 'signed-out';
+  const user = await currentUser();
+  if (!user) return 'signed-out';
+
+  if ((await getMeta('ingest.registered', null)) === `${user.id}:${token}`) return 'ok';
+
+  try {
+    // Anything else registered for this account is a token no macro should be
+    // using any more — the same rule the Settings button applies when it
+    // regenerates, so a stale token cannot outlive the device it was made on.
+    await sb.from('ingest_tokens').delete().eq('user_id', user.id).neq('token', token);
+    const { error } = await sb
+      .from('ingest_tokens')
+      .upsert({ token, user_id: user.id, label: 'device' });
+    if (error) return 'failed';
+    await setMeta('ingest.registered', `${user.id}:${token}`);
+    return 'ok';
+  } catch {
+    return 'failed';
+  }
+}
 
 export async function pullInbox() {
   if (!isConfigured()) return { pulled: 0 };
@@ -20,6 +66,10 @@ export async function pullInbox() {
   if (!sb) return { pulled: 0 };
   const user = await currentUser();
   if (!user) return { pulled: 0 };
+
+  // Cheap after the first success, and the only thing that heals a token that
+  // was generated while signed out.
+  await ensureIngestToken();
 
   try {
     const { data, error } = await sb

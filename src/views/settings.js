@@ -14,8 +14,9 @@ import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
 import { SPEND_CATEGORIES, CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
-import { isConfigured, currentUser, signIn, signOut, supabase } from '../db/supabase.js';
+import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
+import { ensureIngestToken } from '../db/ingest.js';
 import { escapeHtml } from '../capture/entry.js';
 
 export async function renderSettings(root) {
@@ -381,6 +382,7 @@ Content-Type: text/plain
            <input type="checkbox" id="ingest-enabled"${enabled ? ' checked' : ''} />
            <span>Pull forwarded messages into the inbox</span>
          </label>
+         <p id="ingest-state" class="hint">Checking the token with the server…</p>
          <p id="ingest-msg" class="hint"></p>
          <button type="button" id="ingest-regen" class="link">Generate a new token</button>`
       : `<button type="button" id="ingest-gen">Generate my token</button>`;
@@ -389,39 +391,42 @@ Content-Type: text/plain
     enabledBox?.addEventListener('change', () => setMeta('ingest.enabled', enabledBox.checked));
     root.querySelector('#ingest-gen')?.addEventListener('click', generateToken);
     root.querySelector('#ingest-regen')?.addEventListener('click', generateToken);
+    if (token) showTokenState();
+  }
+
+  /* Whether the endpoint will actually accept this token, stated on the screen
+   * that shows it. A token the server has never seen looks identical here but
+   * answers every macro with 401, and the macro cannot tell you why. */
+  async function showTokenState() {
+    const state = await ensureIngestToken();
+    const line = root.querySelector('#ingest-state');
+    if (!line) return;
+    const said = {
+      ok: ['ok', 'Registered — the endpoint will accept this token.'],
+      'signed-out': ['warn', 'Not registered: sign in under Sync, then reopen this page. Until then every forwarded message comes back 401.'],
+      failed: ['warn', 'Could not reach the server to register this token. Forwarded messages will 401 until it does — reopen this page when you are online.'],
+      'no-token': ['hint', ''],
+    }[state] ?? ['hint', ''];
+    line.className = said[0];
+    line.textContent = said[1];
   }
 
   async function generateToken() {
     const token = `${newId()}${newId()}`.replace(/-/g, '');
     await setMeta('ingest.token', token);
 
-    /* Register it server-side so the Edge Function can resolve it to this user,
-     * and drop whatever was registered before: generating a new token is how a
-     * lost phone is revoked, so leaving the old row would make revoking a lie.
-     *
-     * Reported rather than swallowed. A token that never reached the server
-     * looks identical on this screen but silently rejects every forwarded
-     * message with a 401, which is a miserable thing to debug from a macro. */
-    let registered = false;
-    let why = 'Sign in under Sync first — the token has to belong to an account.';
-    if (isConfigured()) {
-      try {
-        const sb = supabase();
-        const user = await currentUser();
-        if (!sb || !user) {
-          /* keep the sign-in message */
-        } else {
-          await sb.from('ingest_tokens').delete().eq('user_id', user.id);
-          const { error } = await sb
-            .from('ingest_tokens')
-            .insert({ token, user_id: user.id, label: 'device' });
-          if (error) why = 'Saved on this device, but the server refused it. Try again once online.';
-          else registered = true;
-        }
-      } catch {
-        why = 'Saved on this device, but the server could not be reached. Try again once online.';
-      }
-    }
+    /* A new token is only half of revoking the old one; the server has to be
+     * told, and told that the previous row is finished. `ensureIngestToken`
+     * owns both halves so the app start-up path repairs exactly what this
+     * button writes. The result is reported rather than swallowed: a token
+     * that never reached the server looks identical on this screen and answers
+     * every forwarded message with 401. */
+    await setMeta('ingest.registered', null);
+    const state = await ensureIngestToken();
+    const registered = state === 'ok';
+    const why = state === 'signed-out'
+      ? 'Saved on this device, but sign in under Sync before it will work — an unregistered token is refused with 401.'
+      : 'Saved on this device, but the server could not be reached. Reopen this page when you are online.';
 
     await refreshIngest();
     const msg = root.querySelector('#ingest-msg');

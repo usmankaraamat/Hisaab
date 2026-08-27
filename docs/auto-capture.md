@@ -62,6 +62,11 @@ nothing else to configure, and no secret ships to the browser.
 5. Turn on **Pull forwarded messages into the inbox**. Until this is on the app
    never polls, so a phone that has not been set up costs nothing.
 
+The line under the token says whether the server has accepted it. It has to read
+**Registered** before a macro can work; if it asks you to sign in, the token
+exists only on this phone and every forwarded message will come back `401`.
+Opening this page again re-registers it, so that is also the repair.
+
 > Generating a new token replaces the old one. That is also how you revoke a
 > phone you no longer have: generate again, and the old token stops working.
 
@@ -156,9 +161,15 @@ Android builds do not deliver the broadcast the normal trigger listens for. RCS
 3. Open Hisaab. It appears under **To be resolved** on the home screen within a
    few seconds. Tap it, say what it was for, save.
 
-`401 unknown token` means the header token no longer matches Settings — usually
-because a newer one was generated afterwards. `400` means the body arrived
-empty, which usually means the magic text was typed by hand and did not resolve.
+`401 unknown token` means the server does not recognise the token. Almost always
+this is a token that was generated on the phone while signed out, so it was
+never registered against an account — the macro is correct and the endpoint is
+right to refuse it. Open **Settings → Auto-capture** while signed in: the app
+re-registers the token and the line under it says which state you are in. You do
+not have to change the macro, because the token itself has not changed.
+
+`400` means the body arrived empty, which usually means the magic text was typed
+by hand instead of picked from the list, and so did not resolve.
 
 ## Part 3b — Tasker and HTTP Shortcuts
 
@@ -212,7 +223,7 @@ A token in the header or the query string wins over one in the body.
 | Symptom | Cause |
 | --- | --- |
 | Nothing ever arrives | *Pull forwarded messages* is off in Settings, or you are signed out. |
-| `401 unknown token` | The header token is stale. Copy the current one from Settings. |
+| `401 unknown token` | The server has never seen that token. Open **Settings → Auto-capture**: it re-registers the token and says whether it worked. If it asks you to sign in, that is the cause — a token generated while signed out lives only on the phone. |
 | `400 a message body is required` | Magic text did not resolve. Pick it from MacroDroid's list instead of typing it. |
 | Worked, then stopped | Battery optimisation killed the listener. Set MacroDroid to **Unrestricted**. |
 | OTPs and promos in the inbox | Add the *Contains text* filter (`Rs` / `PKR`) to the trigger. |
