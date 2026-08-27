@@ -369,8 +369,14 @@ export async function renderSettings(root) {
            <input type="text" readonly value="${escapeHtml(ingestUrl)}" onclick="this.select()" /></label>
          <label class="stack">Your token
            <input type="text" readonly value="${escapeHtml(token)}" onclick="this.select()" /></label>
-         <p class="hint">The automation should POST JSON:</p>
-         <pre class="ingest-body">{ "token": "${escapeHtml(token)}", "body": "&lt;notification text&gt;", "app": "&lt;app name&gt;" }</pre>
+         <p class="hint">The automation POSTs the notification as plain text, with the
+           token in a header — a bank SMS carries line breaks and quotation marks, and
+           nothing here has to survive being pasted into JSON:</p>
+         <pre class="ingest-body">POST ${escapeHtml(ingestUrl)}?app=&lt;app name&gt;
+X-Ingest-Token: ${escapeHtml(token)}
+Content-Type: text/plain
+
+&lt;notification text&gt;</pre>
          <label class="ingest-toggle">
            <input type="checkbox" id="ingest-enabled"${enabled ? ' checked' : ''} />
            <span>Pull forwarded messages into the inbox</span>
@@ -388,22 +394,42 @@ export async function renderSettings(root) {
   async function generateToken() {
     const token = `${newId()}${newId()}`.replace(/-/g, '');
     await setMeta('ingest.token', token);
-    // Register it server-side so the Edge Function can resolve it to this user.
-    // Best-effort: works once sync is set up and the migration is deployed.
+
+    /* Register it server-side so the Edge Function can resolve it to this user,
+     * and drop whatever was registered before: generating a new token is how a
+     * lost phone is revoked, so leaving the old row would make revoking a lie.
+     *
+     * Reported rather than swallowed. A token that never reached the server
+     * looks identical on this screen but silently rejects every forwarded
+     * message with a 401, which is a miserable thing to debug from a macro. */
+    let registered = false;
+    let why = 'Sign in under Sync first — the token has to belong to an account.';
     if (isConfigured()) {
       try {
         const sb = supabase();
         const user = await currentUser();
-        if (sb && user) await sb.from('ingest_tokens').upsert({ token, user_id: user.id, label: 'device' });
+        if (!sb || !user) {
+          /* keep the sign-in message */
+        } else {
+          await sb.from('ingest_tokens').delete().eq('user_id', user.id);
+          const { error } = await sb
+            .from('ingest_tokens')
+            .insert({ token, user_id: user.id, label: 'device' });
+          if (error) why = 'Saved on this device, but the server refused it. Try again once online.';
+          else registered = true;
+        }
       } catch {
-        /* table not deployed yet — the token is stored locally regardless */
+        why = 'Saved on this device, but the server could not be reached. Try again once online.';
       }
     }
+
     await refreshIngest();
     const msg = root.querySelector('#ingest-msg');
     if (msg) {
-      msg.className = 'ok';
-      msg.textContent = 'Token ready. Now point your automation app at the endpoint above.';
+      msg.className = registered ? 'ok' : 'warn';
+      msg.textContent = registered
+        ? 'Token ready, and any earlier one is now revoked. Point your automation app at the endpoint above.'
+        : why;
     }
   }
 

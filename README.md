@@ -72,7 +72,11 @@ Three ways in, in order of how little they ask:
 
 - **Auto-forward.** A phone automation posts each notification to a private,
   RLS-scoped endpoint; the app pulls and parses it. Captures appear with no
-  action at all. Ten-minute one-time setup — see [`docs/auto-capture.md`](docs/auto-capture.md).
+  action at all. The endpoint takes the token in a header and the notification
+  as the raw body, because an automation app builds its request by string
+  substitution and a bank SMS carrying a line break or a quotation mark would
+  break a hand-built JSON one — silently, which is the worst way to lose a
+  capture. One-time setup — see [`docs/auto-capture.md`](docs/auto-capture.md).
 - **Share.** With Hisaab installed, share a notification from Android's share
   sheet straight into the inbox.
 - **Paste.** Tap *Paste a message* and paste the text.

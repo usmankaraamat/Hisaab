@@ -48,6 +48,16 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+/* An instant stated in wall-clock terms, built the way the code builds it.
+ *
+ * A notification says "at 14:18" and a month starts at midnight — both mean
+ * where the phone is, so both are constructed with the local Date constructor.
+ * Comparing against a hard-coded '…T14:18:00.000Z' asserts the machine's zone
+ * rather than the behaviour, and passes only in a UTC container: on the phone
+ * this is written for, every one of those checks failed by five hours. */
+const localIso = (y, m, d, h = 0, mi = 0, s = 0) =>
+  new Date(y, m - 1, d, h, mi, s).toISOString();
+
 let fails = 0;
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -92,16 +102,22 @@ check('easypaisa received (fee line ignored)',
   [5000, 'in', 'Bank BAF', 'easypaisa', null]);
 check('Bank Alfalah sent, with date',
   notif('Transaction Alert PKR 50.00 sent to MALIK USMAN KARAMAT TMB from your BAF A/C **9388 on 10-Aug-26 14:23:57 via FT Tx ID FT262220PL86PYMF', 'Alfa'),
-  [5000, 'out', 'MALIK USMAN KARAMAT', 'Bank Alfalah', '2026-08-10T14:23:57.000Z']);
+  [5000, 'out', 'MALIK USMAN KARAMAT', 'Bank Alfalah', localIso(2026, 8, 10, 14, 23, 57)]);
 check('NayaPay sent (no amount decimals)',
   notif("Off it goes Rs. 10 sent to Usman Karamat. Your wallet's seen better days.", 'NayaPay'),
   [1000, 'out', 'Usman Karamat', 'NayaPay', null]);
 check('easypaisa Raast sent, ISO date',
   notif('Dear MALIK USMAN KARAMAT, An amount of Rs. 675.0 has been successfully sent to AWAIS IQBAL in *******3787 via Raast Payment from your Easypaisa account *****19 on 2026-08-09 at 14:18:28.404552834. Trx ID 3945073211.', 'easypaisa'),
-  [67500, 'out', 'AWAIS IQBAL', 'easypaisa', '2026-08-09T14:18:28.000Z']);
+  [67500, 'out', 'AWAIS IQBAL', 'easypaisa', localIso(2026, 8, 9, 14, 18, 28)]);
 check('HBL SMS received, day-first date',
   notif('PKR 10.00 received from MALIK USMAN KARAMAT IBAN in your HBL A/C via your Raast ID on 09/08/2026 14:24:13 TXN ID SM091424115A8429.', '14250'),
-  [1000, 'in', 'MALIK USMAN KARAMAT', 'HBL', '2026-08-09T14:24:13.000Z']);
+  [1000, 'in', 'MALIK USMAN KARAMAT', 'HBL', localIso(2026, 8, 9, 14, 24, 13)]);
+/* What the documented macro actually sends: the notification title glued to a
+ * multi-line body. Line breaks are why the endpoint takes plain text rather than
+ * JSON, so the parser has to be indifferent to them. */
+check('a title prefix and line breaks are harmless',
+  notif('HBL Alert\nPKR 1,250.00 sent to AWAIS IQBAL\nfrom your HBL A/C on 09/08/2026 14:24:13', '14250'),
+  [125000, 'out', 'AWAIS IQBAL', 'HBL', localIso(2026, 8, 9, 14, 24, 13)]);
 check('a message with no amount is not a capture',
   parseNotification('Your OTP is 4821, do not share it with anyone.'), null);
 check('a fee-only line does not log zero',
@@ -305,9 +321,9 @@ const asOfAug8 = new Date('2026-08-08T12:00:00.000Z');
 const b = budgetSummary(ledgerJuly, { now: asOfAug8 });
 
 // August 2026 opens on a Saturday, so the period starts the following Monday.
-check('the period starts at the first weekday of the month', b.since, '2026-08-03T00:00:00.000Z');
+check('the period starts at the first weekday of the month', b.since, localIso(2026, 8, 3));
 check('the period runs to the first weekday of the next month',
-  b.nextIncomeAt.slice(0, 10), '2026-09-01');
+  b.nextIncomeAt, localIso(2026, 9, 1));
 check('spending before the period is excluded', b.spendMinor, 100000);
 check('an investment is not spending', b.savedMinor, 5000000);
 check('money lent out is not spending', b.lentOutMinor, 44000);
@@ -421,13 +437,13 @@ check('how much a person owes', ask('how much does Sara owe').text, 'Sara owes y
 console.log('\n--- the period is the calendar month, and reconciling does not move it ---');
 
 check('a month opening on a weekday starts on the 1st',
-  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodStart, '2026-09-01T00:00:00.000Z');
+  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodStart, localIso(2026, 9, 1));
 check('and runs to the 1st of the next month',
-  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodEnd, '2026-10-01T00:00:00.000Z');
+  calendarPeriod(new Date('2026-09-15T12:00:00.000Z')).periodEnd, localIso(2026, 10, 1));
 check('a month opening on a weekend starts on the first Monday',
-  calendarPeriod(new Date('2026-11-15T12:00:00.000Z')).periodStart, '2026-11-02T00:00:00.000Z');
+  calendarPeriod(new Date('2026-11-15T12:00:00.000Z')).periodStart, localIso(2026, 11, 2));
 check("a day before this month's start weekday still belongs to last period",
-  calendarPeriod(new Date('2026-11-01T09:00:00.000Z')).periodStart, '2026-10-01T00:00:00.000Z');
+  calendarPeriod(new Date('2026-11-01T09:00:00.000Z')).periodStart, localIso(2026, 10, 1));
 
 /* Reconciling used to re-stamp the opening balance, which reset the period and
  * dropped the salary out of it — the source of the negative balances. Now it
