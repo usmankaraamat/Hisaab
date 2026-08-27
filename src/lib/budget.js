@@ -386,22 +386,37 @@ export function budgetSummary(
  *
  * Totals here reconcile exactly with `spendMinor`.
  */
+/**
+ * Whether one row is money you spent — the single definition the breakdown, the
+ * tiles and Ask all read from.
+ *
+ * It lives here as its own function because three screens ask the question and
+ * a fourth (item totals) was about to ask it again. Two answers to "does this
+ * row count" is exactly the bug class that put 4,050 on one screen and 4,600 on
+ * another.
+ */
+export function isSpendRow(row, { includeNonSpend = false } = {}) {
+  if (!row || row.deleted || REFERENCE.has(row.source)) return false;
+  if (row.direction !== 'out') return false;
+  // A reconciliation charge is a correction, never a purchase — it stays out of
+  // the breakdown whatever else is included, so the bars keep meaning "what you
+  // bought".
+  if (row.category === RECONCILE) return false;
+  if (!includeNonSpend) {
+    if (NON_SPEND.has(row.category)) return false;
+    if (row.ledger_effect === 'borrowed') return false;
+    if (isOutstandingLoan(row)) return false;
+  }
+  return true;
+}
+
 export function categoryTotals(rows, { from = null, to = null, includeNonSpend = false } = {}) {
   const fromMs = from ? new Date(from).getTime() : -Infinity;
   const toMs = to ? new Date(to).getTime() : Infinity;
   const totals = new Map();
 
-  for (const r of live(rows)) {
-    if (r.direction !== 'out') continue;
-    // A reconciliation charge is a correction, never a purchase — it stays out
-    // of the breakdown whatever else is included, so the bars keep meaning
-    // "what you bought".
-    if (r.category === RECONCILE) continue;
-    if (!includeNonSpend) {
-      if (NON_SPEND.has(r.category)) continue;
-      if (r.ledger_effect === 'borrowed') continue;
-      if (isOutstandingLoan(r)) continue;
-    }
+  for (const r of rows) {
+    if (!isSpendRow(r, { includeNonSpend })) continue;
     const at = new Date(r.occurred_at).getTime();
     if (at < fromMs || at > toMs) continue;
 

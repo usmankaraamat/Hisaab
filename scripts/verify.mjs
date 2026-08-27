@@ -38,6 +38,8 @@ import { parseNotification } from '../src/capture/notif.js';
 import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
 import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
 import { answerQuery } from '../src/lib/query.js';
+import { questionTerms, itemTotal, topItems } from '../src/lib/items.js';
+import { payeeKey, learnPayee, recallPayee, forgetPayee } from '../src/lib/payees.js';
 import {
   rideSurge,
   priceIndex,
@@ -1021,6 +1023,104 @@ check('a non-ride is never flagged', surgeCheck(rows, 'Chicken', 500000), null);
       '  The import, prediction and insight checks need the real export, which is\n' +
       '  personal data and stays out of the repo. Pure-logic checks above still ran.'
   );
+}
+
+console.log('\n--- what a payee has sold you before ---');
+{
+  // One shop that only ever sells one thing, and one that sells several. The
+  // whole point is that these two are treated differently: a guess that is
+  // right two thirds of the time costs more than no guess at all.
+  let mem = {};
+  mem = learnPayee(mem, 'AWAIS IQBAL', ['chicken'], '2026-08-01T10:00:00.000Z');
+  mem = learnPayee(mem, 'awais  iqbal', ['chicken'], '2026-08-08T10:00:00.000Z');
+  check('the same payee written two ways is one key',
+    payeeKey('AWAIS IQBAL') === payeeKey('awais  iqbal'), true);
+  check('an account mask is not part of the name',
+    payeeKey('AWAIS IQBAL *****3787'), payeeKey('awais iqbal'));
+  check('a payee who only sells one thing is filled in', recallPayee(mem, 'Awais Iqbal').fill, 'chicken');
+
+  let shop = {};
+  for (const it of ['eggs', 'bread', 'drinks']) shop = learnPayee(shop, 'Corner Store', [it]);
+  const many = recallPayee(shop, 'corner store');
+  check('a payee who sells several fills nothing in', many.fill, null);
+  check('but offers all of them', many.items.map((i) => i.name).sort(), ['bread', 'drinks', 'eggs']);
+
+  // Three chickens against one packet of eggs is still the chicken man.
+  let mixed = {};
+  for (let i = 0; i < 3; i++) mixed = learnPayee(mixed, 'Butcher', ['chicken']);
+  mixed = learnPayee(mixed, 'Butcher', ['eggs']);
+  const lean = recallPayee(mixed, 'Butcher');
+  check('a dominant item still leads', lean.fill, 'chicken');
+  check('and the rest stay on offer', lean.items.length, 2);
+
+  check('one payment split across two things teaches both',
+    recallPayee(learnPayee({}, 'Store', ['milk', 'sugar']), 'Store').items.length, 2);
+  check('a payment with no payee teaches nothing', learnPayee({}, null, ['milk']), {});
+  check('a payee can be forgotten', forgetPayee(mixed, 'Butcher'), {});
+  check('the store is never mutated in place', Object.keys(mem).length, 1);
+}
+
+console.log('\n--- asking about a thing, not a category ---');
+{
+  const itemRows = [
+    spend({ raw_name: 'Chicken', amount_minor: 90000, category: 'Groceries',
+            occurred_at: '2026-08-04T10:00:00.000Z' }),
+    spend({ raw_name: 'chicken karahi', amount_minor: 130000, category: 'Eating Out',
+            occurred_at: '2026-08-06T10:00:00.000Z' }),
+    spend({ raw_name: 'Chickens', amount_minor: 80000, category: 'Groceries',
+            occurred_at: '2026-08-08T10:00:00.000Z' }),
+    spend({ raw_name: 'Chicken', amount_minor: 85000, category: 'Groceries',
+            occurred_at: '2026-08-09T10:00:00.000Z' }),
+    spend({ raw_name: 'Egg tray', amount_minor: 68000, category: 'Groceries',
+            occurred_at: '2026-08-07T10:00:00.000Z' }),
+    // Excluded on purpose: an item total must count exactly what the breakdown
+    // counts, or Ask and the bars underneath it disagree.
+    spend({ raw_name: 'Chicken investment', amount_minor: 500000, category: 'Savings',
+            occurred_at: '2026-08-05T10:00:00.000Z' }),
+    spend({ raw_name: 'chicken for Tom', amount_minor: 200000, category: 'Groceries',
+            counterparty_name: 'Tom', ledger_effect: 'lent',
+            occurred_at: '2026-08-05T10:00:00.000Z' }),
+    spend({ raw_name: 'Chicken', amount_minor: 70000, category: 'Groceries',
+            source: 'bluecoins', occurred_at: '2026-08-02T10:00:00.000Z' }),
+  ];
+
+  check('the question keeps only its subject',
+    questionTerms('how much did I spend on chicken this month'), ['chicken']);
+  check('a question with no subject has no terms',
+    questionTerms('how much did I spend this month'), []);
+
+  const chicken = itemTotal(itemRows, 'how much did I spend on chicken');
+  check('an item total sums every spelling', chicken.totalMinor, 385000);
+  check('and counts them', chicken.count, 4);
+  check('a plural in the question matches the singular in the entry',
+    itemTotal(itemRows, 'eggs').count, 1);
+  // 900 + 1,300 + 800 only: the 5,000 investment, the 2,000 still owed by Tom
+  // and the 700 imported row are all things the breakdown leaves out too.
+  check('an item counts exactly what the breakdown counts',
+    chicken.totalMinor + 500000 + 200000 + 70000, 1155000);
+  check('the usual price is the median, not dragged by one big buy',
+    itemTotal(itemRows, 'chicken').unitMinor, 87500);
+  check('a thing never bought has no answer', itemTotal(itemRows, 'saffron'), null);
+
+  const two = itemTotal(itemRows, 'chicken karahi');
+  check('a phrase beats its separate words', two.match, 'phrase');
+  check('and totals only the phrase', two.totalMinor, 130000);
+
+  const top = topItems(itemRows, { limit: 2 });
+  check('the biggest thing is chicken, not a category', top[0].label, 'Chicken');
+  check('and spellings of it are one thing', top[0].count, 3);
+  check('named by the spelling used most, not the one used last', top[0].label, 'Chicken');
+
+  const asOf = new Date('2026-08-10T12:00:00.000Z');
+  const ask2 = (q) => answerQuery(q, itemRows, { now: asOf });
+  check('Ask answers an item question', ask2('how much did I spend on chicken this month').amountMinor, 385000);
+  check('and hands History the words it counted', ask2('how much on chicken').query, 'chicken');
+  check('a category still wins a word that is both',
+    ask2('how much on groceries this month').category, 'Groceries');
+  check('an unknown subject is said to be unknown',
+    /Nothing matching/.test(ask2('how much did I spend on saffron').text), true);
+  check('a subjectless question is still the plain total',
+    ask2('how much did I spend this month').amountMinor, 453000);
 }
 
 /* A source-level check, because this one is invisible at runtime.

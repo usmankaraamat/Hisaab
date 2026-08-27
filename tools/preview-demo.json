@@ -1,0 +1,56 @@
+{
+  "_": "Synthetic fixture for the visual harness. Invented rows, no real data — that is why this one is committed and preview-rows.json is not.",
+  "meta": {
+    "budget.opening": { "amountMinor": 4500000, "at": "2026-08-03T09:00:00.000Z" },
+    "budget.savingsTarget": 2000000,
+    "payees": {
+      "awais iqbal": { "name": "AWAIS IQBAL", "items": { "chicken": { "name": "Chicken", "count": 4, "lastAt": "2026-08-20T10:00:00.000Z" } } },
+      "corner store": {
+        "name": "Corner Store",
+        "items": {
+          "eggs": { "name": "Eggs", "count": 3, "lastAt": "2026-08-24T10:00:00.000Z" },
+          "bread": { "name": "Bread", "count": 2, "lastAt": "2026-08-22T10:00:00.000Z" },
+          "drinks": { "name": "Drinks", "count": 2, "lastAt": "2026-08-19T10:00:00.000Z" }
+        }
+      }
+    }
+  },
+  "pending": [
+    {
+      "id": "p1",
+      "amountMinor": 67500,
+      "direction": "out",
+      "counterparty": "Corner Store",
+      "source": "easypaisa",
+      "kind": "notification",
+      "occurred_at": "2026-08-27T09:12:00.000Z",
+      "created_at": "2026-08-27T09:12:00.000Z",
+      "raw": "Dear MALIK USMAN KARAMAT, An amount of Rs. 675.0 has been successfully sent to Corner Store via Raast Payment from your Easypaisa account on 2026-08-27 at 14:12:00."
+    },
+    {
+      "id": "p2",
+      "amountMinor": 120000,
+      "direction": "out",
+      "counterparty": "AWAIS IQBAL",
+      "source": "NayaPay",
+      "kind": "notification",
+      "occurred_at": "2026-08-26T13:40:00.000Z",
+      "created_at": "2026-08-26T13:40:00.000Z",
+      "raw": "Off it goes. Rs. 1200 sent to AWAIS IQBAL."
+    }
+  ],
+  "rows": [
+    { "id": "r1", "raw_name": "Salary", "amount_minor": 13000000, "direction": "in", "category": "Income", "occurred_at": "2026-08-03T09:00:00.000Z", "deleted": 0 },
+    { "id": "r2", "raw_name": "Indrive Home - Office", "display_name": "Indrive Home → Office", "amount_minor": 20000, "direction": "out", "category": "Rides", "occurred_at": "2026-08-24T04:10:00.000Z", "deleted": 0 },
+    { "id": "r3", "raw_name": "Indrive Gym - Home", "display_name": "Indrive Gym → Home", "amount_minor": 31000, "direction": "out", "category": "Rides", "occurred_at": "2026-08-24T16:20:00.000Z", "deleted": 0 },
+    { "id": "r4", "raw_name": "Indrive Home - Office", "display_name": "Indrive Home → Office", "amount_minor": 21000, "direction": "out", "category": "Rides", "occurred_at": "2026-08-25T04:05:00.000Z", "deleted": 0 },
+    { "id": "r5", "raw_name": "Indrive Gym - Home", "display_name": "Indrive Gym → Home", "amount_minor": 30000, "direction": "out", "category": "Rides", "occurred_at": "2026-08-25T16:30:00.000Z", "deleted": 0 },
+    { "id": "r6", "raw_name": "Chicken", "amount_minor": 90000, "direction": "out", "category": "Groceries", "occurred_at": "2026-08-20T10:00:00.000Z", "deleted": 0 },
+    { "id": "r7", "raw_name": "Eggs", "amount_minor": 68000, "direction": "out", "category": "Groceries", "occurred_at": "2026-08-24T10:00:00.000Z", "deleted": 0 },
+    { "id": "r8", "raw_name": "Lunch", "amount_minor": 55000, "direction": "out", "category": "Eating Out", "occurred_at": "2026-08-26T07:30:00.000Z", "deleted": 0 },
+    { "id": "r9", "raw_name": "Netflix", "amount_minor": 50000, "direction": "out", "category": "Subscriptions", "occurred_at": "2026-08-12T10:00:00.000Z", "deleted": 0 },
+    { "id": "r10", "raw_name": "Cake for Sister", "amount_minor": 220000, "direction": "out", "category": "Gifts & Treats", "counterparty_name": "Sister", "ledger_effect": "lent", "occurred_at": "2026-08-18T10:00:00.000Z", "deleted": 0 },
+    { "id": "r11", "raw_name": "Investment", "amount_minor": 3000000, "direction": "out", "category": "Savings", "occurred_at": "2026-08-05T10:00:00.000Z", "deleted": 0 },
+    { "id": "r12", "raw_name": "Indrive Home - Office", "display_name": "Indrive Home → Office", "amount_minor": 19000, "direction": "out", "category": "Rides", "occurred_at": "2026-08-26T04:15:00.000Z", "deleted": 0 }
+  ]
+}

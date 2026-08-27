@@ -262,10 +262,14 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 
 /* ---------- To be resolved (pending inbox) ---------- */
 
-.inbox { margin-top: 26px; }
-.inbox-head { display: flex; align-items: baseline; justify-content: space-between; }
-.inbox-head .recent-head { margin-top: 0; }
+.inbox { margin: 0 0 20px; }
+.inbox .recent-head { margin: 0 0 8px; }
+/* An outstanding item is the one thing on this screen the app is waiting on,
+   so it carries the accent the Save button does — the eye should land here
+   before it lands on a number. */
+.inbox-row { box-shadow: inset 3px 0 0 var(--accent); }
 
+.paste-foot { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
 .paste-box { margin: 8px 0 4px; }
 .paste-box textarea {
   width: 100%;
@@ -281,9 +285,7 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 .paste-actions { display: flex; justify-content: flex-end; gap: 12px; align-items: center; margin-top: 6px; }
 .paste-msg { margin: 4px 0 0; }
 
-.inbox-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.inbox-empty { color: var(--muted); font-size: .82rem; padding: 4px 2px; }
-.inbox.empty .inbox-list { gap: 0; }
+.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 
 .inbox-row {
   border: 1px solid var(--line);
@@ -321,6 +323,12 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
   color: var(--muted); font-size: .76rem; line-height: 1.4;
   background: var(--bg); border-radius: 8px;
 }
+.resolve-recall {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px;
+}
+.resolve-recall .hint { margin: 0 2px 0 0; font-size: .74rem; }
+.resolve-recall .chip { padding: 5px 10px; font-size: .8rem; }
+
 .resolve-item { display: flex; gap: 8px; margin-bottom: 8px; }
 .resolve-item input[name="name"] { flex: 1; min-width: 0; }
 .resolve-item input[name="amt"] { width: 92px; text-align: right; }

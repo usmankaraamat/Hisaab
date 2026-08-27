@@ -68,6 +68,22 @@ Bank BAF`, `Rs. 675.0 … sent to AWAIS IQBAL via Raast`, an HBL SMS — pulling
 the amount (never the `Fee … Rs. 0.00` line), the direction, the counterparty and
 the date. Nothing is a category yet; the meaning is still the person's to give.
 
+What is waiting on you sits directly under the direction buttons, above the
+suggestions and every number — it is the likeliest next action, and it used to
+be below two blocks of reporting. When one payment is waiting it opens itself,
+because opening it is the only reason to look at it. When nothing is waiting the
+whole section is gone, rather than leaving a permanent apology for a screen that
+is working.
+
+The name box opens **empty**. It used to open holding the payee from the
+notification, which is never the answer: you are not buying *Awais Iqbal*, you
+are buying chicken from him, so the first keystroke was always a clear — a
+prefill that cost more than the blank it replaced. The payee is still the best
+clue available, just about the wrong field, so what is remembered is the pairing.
+A payee who only ever sells one thing has it filled in; a payee who sells eggs,
+bread and drinks offers all three as chips and fills in nothing, because a guess
+that is right two thirds of the time costs more than no guess at all.
+
 Three ways in, in order of how little they ask:
 
 - **Auto-forward.** A phone automation posts each notification to a private,
@@ -97,9 +113,26 @@ Four smaller conveniences layer onto the same offline, private core:
 - **Recurring** — tell the app about rent or a subscription and its occurrence
   drops into the inbox when due, for a one-tap confirm. It never logs money that
   may not have moved.
-- **Ask** — a one-line question box over the local ledger ("how much on eating out
-  last month", "who owes me the most"), answered on the device with no model and
+- **Ask** — a one-line question box over the local ledger ("how much on chicken
+  this month", "who owes me the most"), answered on the device with no model and
   no data leaving the phone.
+
+Ask started out knowing only categories, which was the wrong half: the category
+totals are drawn as bars directly beneath the box, so "how much on chicken" was
+answered with a number that ignored the word. The vocabulary of *things* is not
+a fixed list and should not be — it is whatever is in your own entries, so the
+question is matched against the labels of the rows themselves. It works the day
+you first buy something, and it survives you calling it something new.
+
+    You spent Rs 3,850 on chicken this month, across 4 entries,
+    usually Rs 875 each.                            [ See the entries ]
+
+The usual price is the median, so one bulk buy does not redefine what a chicken
+costs, and a word that means both a thing and a category still answers as the
+category it draws a bar for. A subject it does not recognise is *said* to be
+unrecognised rather than quietly answered with the month's total. What counts as
+spend comes from the same predicate the breakdown uses, so an item total can
+never include a row the bars leave out.
 
 ## Shared expenses
 

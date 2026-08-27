@@ -101,7 +101,7 @@ function wireAsk(host, rows, now) {
     const a = answerQuery(input.value, rows, { now });
     out.hidden = false;
     out.textContent = a.text;
-    if (a.category || a.person || a.from) {
+    if (a.category || a.person || a.from || a.query) {
       const link = document.createElement('button');
       link.type = 'button';
       link.className = 'link ask-link';
@@ -109,6 +109,9 @@ function wireAsk(host, rows, now) {
       link.addEventListener('click', () => {
         if (a.person) return go('ledger');
         const params = {};
+        // An item answer hands History the same words it counted, so the list
+        // that opens adds up to the figure that was just read out.
+        if (a.query) params.q = a.query;
         if (a.category) params.cat = a.category;
         if (a.from) params.from = toDateInput(a.from);
         if (a.to) params.to = toDateInput(a.to);

@@ -18,7 +18,10 @@ import { personKey } from '../capture/split.js';
  * so the production build drops the branch entirely; the app itself never sets
  * `window.__rows`. Two CSS collisions that only show up on screen were caught
  * this way. */
-const PREVIEW = import.meta.env?.DEV && typeof window !== 'undefined' && !!window.__rows;
+/* Evaluated per call, not once at import: the harness sets window.__rows in its
+ * own module body, which runs after every import has already been evaluated. As
+ * a const this was always false, and the preview screen rendered empty. */
+const PREVIEW = () => import.meta.env?.DEV && typeof window !== 'undefined' && !!window.__rows;
 
 const DB_NAME = 'hisaab';
 const DB_VERSION = 2;
@@ -410,7 +413,7 @@ export async function listTransactions({ limit = 200, includeDeleted = false } =
 }
 
 export async function allTransactions() {
-  if (PREVIEW) return window.__rows;
+  if (PREVIEW()) return window.__rows;
   const db = await openDB();
   const { t } = tx(db, ['transactions'], 'readonly');
   const all = await req(t.objectStore('transactions').getAll());
@@ -475,7 +478,7 @@ export async function upsertFromServer(rows) {
 }
 
 export async function getMeta(key, fallback = null) {
-  if (PREVIEW) return window.__meta?.[key] ?? fallback;
+  if (PREVIEW()) return window.__meta?.[key] ?? fallback;
   const db = await openDB();
   const { t } = tx(db, ['meta'], 'readonly');
   const row = await req(t.objectStore('meta').get(key));
@@ -483,6 +486,10 @@ export async function getMeta(key, fallback = null) {
 }
 
 export async function setMeta(key, value) {
+  if (PREVIEW()) {
+    window.__meta = { ...(window.__meta || {}), [key]: value };
+    return;
+  }
   const db = await openDB();
   const { t, done } = tx(db, ['meta'], 'readwrite');
   t.objectStore('meta').put({ key, value });
@@ -530,6 +537,7 @@ export async function addPending(input) {
 }
 
 export async function listPending() {
+  if (PREVIEW()) return window.__pending ?? [];
   const db = await openDB();
   const { t } = tx(db, ['pending'], 'readonly');
   const all = await req(t.objectStore('pending').getAll());

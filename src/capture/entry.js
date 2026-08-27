@@ -29,9 +29,24 @@ import { syncNow } from '../db/sync.js';
 import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
 import { sparkPoints } from '../lib/chart.js';
 import { findDuplicate } from '../lib/dupes.js';
+import { learnPayee, recallPayee } from '../lib/payees.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/* The order of this screen is an argument about attention.
+ *
+ * The input is first because capture is the product. What comes next is
+ * whatever the app is *waiting on you for* — a forwarded payment whose meaning
+ * only you know — because that is the likeliest next action and it used to sit
+ * below three blocks of reporting, which meant scrolling past two numbers to do
+ * the one thing outstanding. It disappears entirely when there is nothing
+ * pending, so the quiet case stays quiet.
+ *
+ * Then the suggestions, which are a faster way to type. Then the numbers, in
+ * the order they change a decision: what is left per day first, then the shape
+ * of the habit. "Paste a message" sits at the very bottom: it is a tool, used
+ * once in a while, and it was taking a heading next to work that mattered.
+ */
 export async function renderAdd(root) {
   root.innerHTML = `
     <section class="capture">
@@ -63,23 +78,28 @@ export async function renderAdd(root) {
           <button type="button" data-dir="out" class="active">Spent</button>
           <button type="button" data-dir="in">Received</button>
         </div>
-
-        <div class="suggestions" id="suggestions" aria-label="Suggestions for right now"></div>
-
-        <div class="chips" id="amount-chips"></div>
-
-        <button type="submit" id="save" class="save" disabled>Save</button>
       </form>
+
+      <section class="inbox" id="inbox" hidden>
+        <h2 class="recent-head" id="inbox-head">To be resolved</h2>
+        <ul class="inbox-list" id="inbox-list"></ul>
+      </section>
+
+      <div class="suggestions" id="suggestions" aria-label="Suggestions for right now"></div>
+
+      <div class="chips" id="amount-chips"></div>
+
+      <button type="submit" form="entry-form" id="save" class="save" disabled>Save</button>
 
       <div class="toast" id="toast" hidden></div>
 
       <p class="allowance" id="allowance" hidden></p>
 
-      <section class="inbox" id="inbox">
-        <div class="inbox-head">
-          <h2 class="recent-head">To be resolved</h2>
-          <button type="button" class="link" id="paste-notif">Paste a message</button>
-        </div>
+      <h2 class="recent-head">Spending so far</h2>
+      <div class="spend-tiles" id="spend-tiles"></div>
+
+      <div class="paste-foot">
+        <button type="button" class="link" id="paste-notif">Paste a message</button>
         <form class="paste-box" id="paste-box" hidden>
           <textarea id="paste-text" rows="3" placeholder="Paste a bank or wallet notification…"
             spellcheck="false"></textarea>
@@ -89,11 +109,7 @@ export async function renderAdd(root) {
           </div>
           <p class="paste-msg hint" id="paste-msg"></p>
         </form>
-        <ul class="inbox-list" id="inbox-list"></ul>
-      </section>
-
-      <h2 class="recent-head">Spending so far</h2>
-      <div class="spend-tiles" id="spend-tiles"></div>
+      </div>
     </section>
   `;
 
@@ -107,6 +123,7 @@ export async function renderAdd(root) {
   const toast = root.querySelector('#toast');
   const spendTiles = root.querySelector('#spend-tiles');
   const inbox = root.querySelector('#inbox');
+  const inboxHead = root.querySelector('#inbox-head');
   const inboxList = root.querySelector('#inbox-list');
   const pasteBtn = root.querySelector('#paste-notif');
   const pasteBox = root.querySelector('#paste-box');
@@ -130,6 +147,9 @@ export async function renderAdd(root) {
   let splitOverride = null;
   // Deterministic capture rules, applied to plain entries before the model runs.
   let rules = [];
+  // What each payee has sold you before, so a resolve form opens on the thing
+  // rather than on their name. See lib/payees.js.
+  let payees = {};
 
   /* If a rule matches, set its category outright and mark the row done so the
    * enrichment pass leaves it alone. Splits are exempt: they already carry a
@@ -495,21 +515,25 @@ export async function renderAdd(root) {
     await materializeDue();
     const items = await listPending();
     inboxList.innerHTML = '';
+
+    // Nothing waiting means nothing here at all. An empty section with a line
+    // of explanation is a permanent apology for a screen that is working.
     if (!items.length) {
-      inbox.classList.add('empty');
-      inboxList.innerHTML =
-        '<li class="inbox-empty hint">Nothing waiting. Forward or paste a payment message and it lands here.</li>';
+      inbox.hidden = true;
       return;
     }
-    inbox.classList.remove('empty');
-    for (const p of items) inboxList.append(pendingRow(p));
+
+    inbox.hidden = false;
+    inboxHead.textContent =
+      items.length === 1 ? 'To be resolved' : `To be resolved · ${items.length}`;
+    for (const p of items) inboxList.append(pendingRow(p, items.length === 1));
   }
 
   function dirWord(dir) {
     return dir === 'in' ? 'Received' : 'Sent';
   }
 
-  function pendingRow(p) {
+  function pendingRow(p, openNow = false) {
     const li = document.createElement('li');
     li.className = 'inbox-row';
     const bits = [p.source || 'payment', p.counterparty].filter(Boolean).join(' · ');
@@ -521,11 +545,18 @@ export async function renderAdd(root) {
         )}</span>
         <span class="inbox-meta"><b>${dirWord(p.direction)}</b> · ${escapeHtml(bits)}${tag}</span>
       </button>`;
-    li.querySelector('.inbox-open').addEventListener('click', () => {
+
+    const open = ({ focus = true } = {}) => {
       if (li.querySelector('form')) return;
       li.append(resolver(p, li));
-      li.querySelector('input[name="name"]')?.focus();
-    });
+      if (focus) li.querySelector('input[name="name"]')?.focus();
+    };
+    li.querySelector('.inbox-open').addEventListener('click', () => open());
+
+    // One waiting payment needs no tap to reveal itself — opening it is the
+    // only reason to be looking at it. Several stay collapsed, because a list
+    // of open forms is not a list.
+    if (openNow) open({ focus: false });
     return li;
   }
 
@@ -549,9 +580,27 @@ export async function renderAdd(root) {
         <button type="button" class="resolve-del" aria-label="Remove item">×</button>
       </div>`;
 
+    /* What this payee has sold you before — never who they are.
+     *
+     * The name box used to open holding the counterparty, which is never the
+     * answer: you are not buying *Awais Iqbal*, you are buying chicken from
+     * him, so the first keystroke was always a clear. The payee is still the
+     * best clue available, just about the wrong field. See lib/payees.js for
+     * why one shop is filled in and another is only offered. */
+    const recall = recallPayee(payees, p.counterparty);
+    const usual = recall.items.length
+      ? `<div class="resolve-recall">
+           <span class="hint">${escapeHtml(p.counterparty || 'Before')}:</span>
+           ${recall.items
+             .map((i) => `<button type="button" class="chip">${escapeHtml(i.name)}</button>`)
+             .join('')}
+         </div>`
+      : '';
+
     form.innerHTML = `
       ${p.raw ? `<p class="resolve-raw">${escapeHtml(p.raw)}</p>` : ''}
-      <div class="resolve-items">${itemRow(p.counterparty || '', p.amountMinor)}</div>
+      ${usual}
+      <div class="resolve-items">${itemRow(recall.fill || '', p.amountMinor)}</div>
       <button type="button" class="link resolve-add">+ Add another item</button>
       <p class="resolve-sum hint"></p>
       <div class="resolve-actions">
@@ -582,6 +631,19 @@ export async function renderAdd(root) {
       sumLine.className = `resolve-sum hint${balanced ? ' ok' : ''}`;
       submit.disabled = !balanced || rows.some((r) => !r.name);
     }
+
+    // A remembered name goes into whichever box is in play: the one being
+    // typed in, else the first still empty, else the first.
+    form.querySelector('.resolve-recall')?.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const boxes = [...items.querySelectorAll('input[name="name"]')];
+      const box =
+        boxes.find((b) => b === document.activeElement) || boxes.find((b) => !b.value) || boxes[0];
+      box.value = chip.textContent;
+      box.focus();
+      refreshSum();
+    });
 
     items.addEventListener('input', refreshSum);
     items.addEventListener('click', (e) => {
@@ -634,6 +696,13 @@ export async function renderAdd(root) {
           }
           await addTransaction(input);
         }
+      }
+
+      // Remember the pairing before the pending row is gone, so the next
+      // payment to this payee opens on what you actually bought from them.
+      if (p.counterparty) {
+        payees = learnPayee(payees, p.counterparty, rows.map((r) => r.name), p.occurred_at);
+        await setMeta('payees', payees);
       }
 
       await deletePending(p.id);
@@ -701,13 +770,16 @@ export async function renderAdd(root) {
     const over = b.safeToSpendMinor < 0;
     allowance.hidden = false;
     allowance.className = `allowance${over ? ' over' : ''}`;
+    // The per-day figure leads. It is the one that can change what you do in
+    // the next minute; the balance behind it is context for the figure, not the
+    // other way round.
     allowance.innerHTML = over
       ? `<b>${formatMinor(-b.safeToSpendMinor)} over</b> with ${b.daysLeft} day${
           b.daysLeft === 1 ? '' : 's'
         } to go`
-      : `<b>${formatMinor(b.safeToSpendMinor)}</b> left · ${formatMinor(b.dailyMinor)} a day for ${
-          b.daysLeft
-        } day${b.daysLeft === 1 ? '' : 's'}`;
+      : `<b>${formatMinor(b.dailyMinor)} a day</b> for ${b.daysLeft} day${
+          b.daysLeft === 1 ? '' : 's'
+        } · ${formatMinor(b.safeToSpendMinor)} left`;
   }
 
   async function refreshNames() {
@@ -718,6 +790,7 @@ export async function renderAdd(root) {
   async function refreshAll() {
     history = await allTransactions();
     rules = await getMeta('capture.rules', []);
+    payees = await getMeta('payees', {});
     people = [...new Set(history.map((r) => r.counterparty_name).filter(Boolean))];
     refreshSpendTiles();
     await Promise.all([

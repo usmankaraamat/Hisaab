@@ -56,6 +56,11 @@ export async function renderHistory(root, params) {
   }
 
   // A link from another tab wins over whatever was left set here.
+  if (params?.has('q')) {
+    filter.text = params.get('q') || '';
+    filter.category = '';
+    filter.person = '';
+  }
   if (params?.has('cat')) {
     filter.category = params.get('cat') || '';
     filter.text = '';
