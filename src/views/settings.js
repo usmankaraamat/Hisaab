@@ -18,6 +18,7 @@ import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
 import { syncNow } from '../db/sync.js';
 import { ensureIngestToken } from '../db/ingest.js';
 import { escapeHtml } from '../capture/entry.js';
+import { ACCENTS, currentAccent, setAccent } from '../ui/theme.js';
 
 export async function renderSettings(root) {
   root.innerHTML = `
@@ -27,6 +28,16 @@ export async function renderSettings(root) {
       <div class="card">
         <h3>Sync</h3>
         <div id="account"></div>
+      </div>
+
+      <div class="card">
+        <h3>Accent colour</h3>
+        <p class="hint">
+          The colour of Save, the active tab, links and every “under pace” figure. Each one
+          is a pair — a dark shade for the light theme, a pale one for dark — so it stays
+          readable either way. Applies at once, on this device.
+        </p>
+        <div class="accent-picker" id="accent-picker" role="radiogroup" aria-label="Accent colour"></div>
       </div>
 
       <div class="card">
@@ -177,6 +188,37 @@ export async function renderSettings(root) {
   `;
 
   organiseSettings(root);
+
+  /* Accent colour. A live preview is the whole point: the swatches sit inside
+   * the app they recolour, so the choice is judged in place rather than from a
+   * name. */
+  const accentPicker = root.querySelector('#accent-picker');
+
+  function refreshAccent() {
+    const active = currentAccent();
+    accentPicker.innerHTML = '';
+    for (const accent of ACCENTS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'accent-swatch';
+      b.dataset.accent = accent.id;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(accent.id === active.id));
+      b.setAttribute('aria-label', accent.name);
+      b.title = accent.name;
+      b.style.setProperty('--swatch-light', accent.light);
+      b.style.setProperty('--swatch-dark', accent.dark);
+      b.classList.toggle('active', accent.id === active.id);
+      b.innerHTML = `<span class="accent-dot"></span><span class="accent-name">${escapeHtml(accent.name)}</span>`;
+      b.addEventListener('click', () => {
+        setAccent(accent.id);
+        refreshAccent();
+      });
+      accentPicker.append(b);
+    }
+  }
+
+  refreshAccent();
 
   const stats = root.querySelector('#stats');
   const result = root.querySelector('#import-result');
@@ -749,6 +791,7 @@ function organiseSettings(root) {
   const groups = [
     ['Account & sync', 'Your current sync state stays visible.', ['Sync'], true],
     ['Capture intelligence', 'Optional notification forwarding and capture helpers.', ['Auto-capture (advanced)'], false],
+    ['Appearance', 'How the app looks on this device.', ['Accent colour'], false],
     ['Budget', 'Balances, savings goals, and category limits.', ['Budget', 'Savings goal', 'Category budgets'], false],
     ['Recurring', 'Charges and income that should surface when due.', ['Recurring & reminders'], false],
     ['Rules', 'Deterministic filing rules applied at capture.', ['Capture rules'], false],

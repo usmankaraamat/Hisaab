@@ -212,8 +212,17 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
   font-weight: 600;
 }
 
-/* Whole-entry suggestions for right now. Deliberately larger and higher up
-   than the amount chips: for ride entries this replaces typing entirely. */
+/* Whole-entry suggestions for the current two-hour slot. Deliberately large:
+   for ride entries this replaces typing entirely. The caption above them says
+   which slot and which days they were learned from, so three short rows are
+   not mistaken for the app having little to offer. */
+.suggest-head {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: .78rem;
+  letter-spacing: .02em;
+}
+
 .suggestions { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 
 .suggestion {
@@ -240,8 +249,6 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 
 .chip {
   padding: 9px 14px;
@@ -1547,7 +1554,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .suggestion::after { content: 'Apply'; color: var(--accent); font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .s-amt { margin-left: auto; }
 
-.chips { margin-bottom: 14px; }
 .chip { min-height: var(--tap); padding: 8px 13px; background: transparent; border-radius: var(--radius-sm); }
 
 .allowance {
@@ -1832,4 +1838,48 @@ button { -webkit-tap-highlight-color: transparent; }
   .rule-add, .sched-add { grid-template-columns: 1fr; }
   .rule-add { flex-direction: column; }
   .cat-budgets { grid-template-columns: 1fr; }
+}
+
+/* Accent picker. Each swatch shows the shade that will actually be used in the
+   theme currently in force, not an average of the pair — picking "Rose" in the
+   dark should show the pale rose the app will wear. */
+.accent-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.accent-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 8px 13px;
+  font: inherit;
+  font-size: .9rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.accent-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--swatch-light);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12);
+}
+
+.accent-swatch:hover { background: var(--surface-raised); }
+.accent-swatch.active {
+  border-color: var(--swatch-light);
+  background: color-mix(in srgb, var(--swatch-light) 12%, transparent);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .accent-dot { background: var(--swatch-dark); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16); }
+  .accent-swatch.active {
+    border-color: var(--swatch-dark);
+    background: color-mix(in srgb, var(--swatch-dark) 16%, transparent);
+  }
 }

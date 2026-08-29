@@ -8,7 +8,7 @@
 
 import { parseEntry } from './parse.js';
 import { planEntry, parseReimbursement, parseFromClause } from './split.js';
-import { frequentAmounts, knownNames, suggestChips, invalidate } from './predict.js';
+import { knownNames, suggestChips, slotOf, slotLabel, invalidate } from './predict.js';
 import {
   addTransaction,
   addTransactions,
@@ -43,8 +43,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * the one thing outstanding. It disappears entirely when there is nothing
  * pending, so the quiet case stays quiet.
  *
- * Then the suggestions, which are a faster way to type. Then the numbers, in
- * the order they change a decision: what is left per day first, then the shape
+ * Then the suggestions, which are a faster way to type — three of them, for the
+ * two-hour slot of the day you are in. The row of stock amounts that used to
+ * follow them is gone: it was a numpad that guessed, and nobody tapped it, so
+ * the numbers that do get read now start a screenful higher. Those come in the
+ * order they change a decision: what is left per day first, then the shape
  * of the habit. "Paste a message" sits at the very bottom: it is a tool, used
  * once in a while, and it was taking a heading next to work that mattered.
  */
@@ -89,9 +92,8 @@ export async function renderAdd(root) {
         <ul class="inbox-list" id="inbox-list"></ul>
       </section>
 
+      <p class="suggest-head" id="suggest-head" hidden></p>
       <div class="suggestions" id="suggestions" aria-label="Suggestions for right now"></div>
-
-      <div class="chips" id="amount-chips"></div>
 
       <div class="toast" id="toast" hidden></div>
 
@@ -119,8 +121,8 @@ export async function renderAdd(root) {
   const input = root.querySelector('#entry-input');
   const preview = root.querySelector('#preview');
   const saveBtn = root.querySelector('#save');
-  const chips = root.querySelector('#amount-chips');
   const suggestions = root.querySelector('#suggestions');
+  const suggestHead = root.querySelector('#suggest-head');
   const dirButtons = [...root.querySelectorAll('.direction button')];
   const toast = root.querySelector('#toast');
   const spendTiles = root.querySelector('#spend-tiles');
@@ -329,15 +331,25 @@ export async function renderAdd(root) {
   }
 
   /**
-   * Whole-entry chips for the current time of day. Tapping one fills the input
-   * with the name and its median amount and leaves the cursor there, so the
-   * predicted price is confirmed rather than silently committed — Save is one
-   * tap away and already enabled.
+   * Whole-entry rows for the two-hour slot the user is in right now, drawn from
+   * the days that resemble today — the last five weekdays, or the last two
+   * weekends. Three of them, not five: this sits above the numbers that were
+   * being scrolled past, and a shorter list is read rather than scanned.
+   *
+   * Tapping one fills the input with the name and its median amount and leaves
+   * the cursor there, so the predicted price is confirmed rather than silently
+   * committed — Save is one tap away and already enabled.
    */
   async function refreshSuggestions() {
-    const picks = await suggestChips({ limit: 5 });
+    const now = new Date();
+    const picks = await suggestChips({ now, limit: 3 });
     suggestions.innerHTML = '';
+    suggestHead.hidden = !picks.length;
     if (!picks.length) return;
+
+    const weekday = now.getDay() !== 0 && now.getDay() !== 6;
+    suggestHead.textContent =
+      `${slotLabel(slotOf(now))} · usually, on ${weekday ? 'a weekday' : 'a weekend'}`;
 
     for (const pick of picks) {
       const b = document.createElement('button');
@@ -357,25 +369,6 @@ export async function renderAdd(root) {
         input.setSelectionRange(input.value.length, input.value.length);
       });
       suggestions.append(b);
-    }
-  }
-
-  async function refreshChips() {
-    const amounts = await frequentAmounts(8);
-    chips.innerHTML = '';
-    for (const { amountMinor } of amounts) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chip';
-      b.textContent = formatMinor(amountMinor);
-      b.addEventListener('click', () => {
-        const { name } = currentParse();
-        const rupees = amountMinor % 100 === 0 ? amountMinor / 100 : (amountMinor / 100).toFixed(2);
-        input.value = `${name} ${rupees}`.trim();
-        refreshPreview();
-        input.focus();
-      });
-      chips.append(b);
     }
   }
 
@@ -802,7 +795,6 @@ export async function renderAdd(root) {
     people = [...new Set(history.map((r) => r.counterparty_name).filter(Boolean))];
     refreshSpendTiles();
     await Promise.all([
-      refreshChips(),
       refreshNames(),
       refreshSuggestions(),
       refreshAllowance(),

@@ -33,8 +33,9 @@ import {
   projectMonth, categoryDelta, categorySeries, suggestedTarget, goalProgress, isTracked, isSpend,
 } from '../src/lib/trends.js';
 import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
-import { rankSuggestions } from '../src/capture/predict.js';
+import { rankSuggestions, referenceDays, slotOf, slotLabel } from '../src/capture/predict.js';
 import { parseNotification } from '../src/capture/notif.js';
+import { ACCENTS, DEFAULT_ACCENT, accentById } from '../src/ui/theme.js';
 import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
 import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
 import { answerQuery } from '../src/lib/query.js';
@@ -932,8 +933,8 @@ const at = (h) => {
   return d;
 };
 
-const morning = rankSuggestions(rows, { now: at(9), limit: 5 });
-const evening = rankSuggestions(rows, { now: at(21), limit: 5 });
+const morning = rankSuggestions(rows, { now: at(9), limit: 3 });
+const evening = rankSuggestions(rows, { now: at(21), limit: 3 });
 
 const labels = (list) => list.map((s) => s.label);
 console.log(`  09:00 ->`);
@@ -949,6 +950,7 @@ check('the two times of day differ',
   JSON.stringify(labels(morning)) === JSON.stringify(labels(evening)), false);
 check('every suggestion carries a median amount',
   [...morning, ...evening].every((s) => Number.isInteger(s.amountMinor) && s.amountMinor > 0), true);
+check('three rows, not five', [morning.length, evening.length], [3, 3]);
 
 console.log('\n--- insights (from the real export) ---');
 const asOf = new Date(summary.max);
@@ -1024,6 +1026,77 @@ check('a non-ride is never flagged', surgeCheck(rows, 'Chicken', 500000), null);
       '  personal data and stays out of the repo. Pure-logic checks above still ran.'
   );
 }
+
+/* The slots and the comparison window.
+ *
+ * Both are wall-clock arguments, so they are checked against fabricated rows
+ * rather than the export: what matters is that a Tuesday learns from weekdays
+ * and a Sunday from weekends, and no real file guarantees a clean example of
+ * both. Every timestamp here is built with the local-time constructor, because
+ * that is how the app reads them back. */
+console.log('\n--- two-hour slots, and the days they learn from ---');
+{
+  check('the day is cut into twelve', [
+    slotOf(new Date(2026, 7, 25, 0, 0)), slotOf(new Date(2026, 7, 25, 1, 59)),
+    slotOf(new Date(2026, 7, 25, 2, 0)), slotOf(new Date(2026, 7, 25, 23, 59)),
+  ], [0, 0, 1, 11]);
+  check('a slot is named by its edges', slotLabel(0), '12am–2am');
+  check('and reads as the clock does at noon', slotLabel(6), '12pm–2pm');
+
+  // Tue 25 Aug 2026. The five weekdays back skip the weekend entirely.
+  check('a weekday looks at five weekdays',
+    [...referenceDays(new Date(2026, 7, 25, 9, 30))],
+    ['2026-08-25', '2026-08-24', '2026-08-21', '2026-08-20', '2026-08-19']);
+
+  // Sun 30 Aug: today, its Saturday, and the whole weekend before.
+  check('a Sunday looks at two whole weekends',
+    [...referenceDays(new Date(2026, 7, 30, 11, 0))],
+    ['2026-08-30', '2026-08-29', '2026-08-23', '2026-08-22']);
+
+  // Sat 29 Aug: this weekend's Sunday has not happened yet, so the window is
+  // today plus the previous Saturday and Sunday — not a Sunday borrowed from
+  // the weekend before that.
+  check('a Saturday does not borrow an older Sunday',
+    [...referenceDays(new Date(2026, 7, 29, 11, 0))],
+    ['2026-08-29', '2026-08-23', '2026-08-22']);
+
+  const row = (name, d, h, minor) => ({
+    raw_name: name,
+    amount_minor: minor,
+    direction: 'out',
+    occurred_at: new Date(2026, 7, d, h, 0, 0).toISOString(),
+  });
+
+  const rows = [
+    // Weekday mornings, in the 8am-10am slot.
+    row('Indrive Home - Office', 24, 8, 18000),
+    row('Indrive Home - Office', 21, 9, 20000),
+    row('Indrive Home - Office', 20, 8, 18000),
+    // Weekend mornings, same slot, a different routine.
+    row('Brunch', 23, 9, 90000),
+    row('Brunch', 22, 9, 85000),
+    // The same weekday, a different slot.
+    row('Eat Out', 24, 21, 55000),
+    // A commute far enough back to fall outside the five-weekday window.
+    row('Indrive Home - Airport', 10, 8, 90000),
+  ];
+
+  const weekdayMorning = rankSuggestions(rows, { now: new Date(2026, 7, 25, 8, 30), limit: 3 });
+  check('a weekday morning offers the commute first',
+    weekdayMorning[0].label, 'Indrive Home → Office');
+  check('priced at the median of the window', weekdayMorning[0].amountMinor, 18000);
+
+  const weekendMorning = rankSuggestions(rows, { now: new Date(2026, 7, 30, 9, 30), limit: 3 });
+  check('a weekend morning offers the weekend routine', weekendMorning[0].label, 'Brunch');
+  check('the same slot on two kinds of day differs',
+    weekdayMorning[0].key === weekendMorning[0].key, false);
+
+  // Nothing at 3am from either window: rather than an empty row, the list falls
+  // back to the same slot elsewhere in history, then to overall favourites.
+  check('a dead slot still offers something',
+    rankSuggestions(rows, { now: new Date(2026, 7, 25, 3, 0), limit: 3 }).length, 3);
+}
+
 
 console.log('\n--- what a payee has sold you before ---');
 {
@@ -1166,7 +1239,22 @@ console.log('\n--- the accent is readable in both themes ---');
     // used as text on an accent fill.
     check(`${label}: readable as text on a card`, contrast(accent, surface) >= 4.5, true);
     check(`${label}: readable as a filled button`, contrast(accent, bg) >= 4.5, true);
+
+    // Every accent the settings screen offers has to clear the same bar the
+    // shipped default does — the point of a picker is that no choice in it is
+    // a bad one.
+    for (const accent of ACCENTS) {
+      const value = label === 'dark' ? accent.dark : accent.light;
+      check(`${label}: ${accent.name} reads on a card`, contrast(value, surface) >= 4.5, true);
+      check(`${label}: ${accent.name} reads as a fill`, contrast(value, bg) >= 4.5, true);
+    }
   }
+
+  check('the default accent is one of the offered ones',
+    ACCENTS.some((a) => a.id === DEFAULT_ACCENT), true);
+  check('the shipped stylesheet accent is the default pair',
+    [token(css.slice(0, dark), 'accent').toLowerCase(), token(css.slice(dark), 'accent').toLowerCase()],
+    [accentById(DEFAULT_ACCENT).light, accentById(DEFAULT_ACCENT).dark]);
 }
 
 /* A source-level check, because this one is invisible at runtime.

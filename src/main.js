@@ -13,6 +13,7 @@ import { parseNotification } from './capture/notif.js';
 import { invalidate } from './capture/predict.js';
 import { parseHash, go } from './nav.js';
 import { renderIcons } from './ui/icons.js';
+import { initAccent } from './ui/theme.js';
 import { getPendingProposalCount } from './views/review.js';
 
 const views = {
@@ -110,6 +111,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('hisaab:review-count', (e) => setReviewBadge(e.detail));
+initAccent();
 renderIcons();
 
 window.addEventListener('hashchange', show);

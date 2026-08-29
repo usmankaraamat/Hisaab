@@ -50,9 +50,15 @@ One line: `chicken 900`. The amount is taken only from a standalone first or las
 token, because real entries contain digits that are not amounts — `Indrive F10-26
 Number`, `26 Number - Anser's Home`. A leading `+` marks incoming money.
 
-Suggestion chips are ranked by hour-of-day against your own history, so the top
-chip is the morning commute at 09:00 and the gym ride home at 21:00. Ride entries
-are ~30% of all entries, and this turns most of them into one tap.
+Three suggestions sit under the input, drawn from your own history for the
+two-hour slot you are in — the day is cut into twelve of them, 12am-2am onwards.
+A weekday learns from the last five weekdays, a Saturday or Sunday from the last
+two weekends, so the office commute never turns up on a Saturday morning. Ride
+entries are ~30% of all entries, and this turns most of them into one tap.
+
+The accent colour is a setting (Settings → Appearance). Each option ships as a
+pair — a dark shade for the light theme, a pale one for dark — and every pair is
+contrast-checked by `npm run verify`.
 
 ## Capture from a notification
 
