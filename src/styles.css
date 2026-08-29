@@ -213,16 +213,7 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
 }
 
 /* Whole-entry suggestions for the current two-hour slot. Deliberately large:
-   for ride entries this replaces typing entirely. The caption above them says
-   which slot and which days they were learned from, so three short rows are
-   not mistaken for the app having little to offer. */
-.suggest-head {
-  margin: 0 0 6px;
-  color: var(--muted);
-  font-size: .78rem;
-  letter-spacing: .02em;
-}
-
+   for ride entries this replaces typing entirely. */
 .suggestions { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 
 .suggestion {
@@ -1543,6 +1534,11 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .suggestions { gap: 7px; margin: 18px 0 12px; }
+
+/* "Money for now" is a conclusion; the tiles under it are a different thought.
+   Adjacent margins collapse, so this gap belongs to the heading between them --
+   a bottom margin on the card itself would be swallowed whole. */
+.allowance + .recent-head { margin-top: 32px; }
 .suggestion {
   min-height: var(--tap);
   padding: 11px 13px;

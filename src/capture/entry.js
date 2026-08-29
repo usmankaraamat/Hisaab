@@ -8,7 +8,7 @@
 
 import { parseEntry } from './parse.js';
 import { planEntry, parseReimbursement, parseFromClause } from './split.js';
-import { knownNames, suggestChips, slotOf, slotLabel, invalidate } from './predict.js';
+import { knownNames, suggestChips, invalidate } from './predict.js';
 import {
   addTransaction,
   addTransactions,
@@ -92,7 +92,6 @@ export async function renderAdd(root) {
         <ul class="inbox-list" id="inbox-list"></ul>
       </section>
 
-      <p class="suggest-head" id="suggest-head" hidden></p>
       <div class="suggestions" id="suggestions" aria-label="Suggestions for right now"></div>
 
       <div class="toast" id="toast" hidden></div>
@@ -122,7 +121,6 @@ export async function renderAdd(root) {
   const preview = root.querySelector('#preview');
   const saveBtn = root.querySelector('#save');
   const suggestions = root.querySelector('#suggestions');
-  const suggestHead = root.querySelector('#suggest-head');
   const dirButtons = [...root.querySelectorAll('.direction button')];
   const toast = root.querySelector('#toast');
   const spendTiles = root.querySelector('#spend-tiles');
@@ -334,22 +332,18 @@ export async function renderAdd(root) {
    * Whole-entry rows for the two-hour slot the user is in right now, drawn from
    * the days that resemble today — the last five weekdays, or the last two
    * weekends. Three of them, not five: this sits above the numbers that were
-   * being scrolled past, and a shorter list is read rather than scanned.
+   * being scrolled past, and a shorter list is read rather than scanned. They
+   * carry no caption — a name and its price are self-evident, and a line of
+   * explanation above three short rows was more furniture than the rows.
    *
    * Tapping one fills the input with the name and its median amount and leaves
    * the cursor there, so the predicted price is confirmed rather than silently
    * committed — Save is one tap away and already enabled.
    */
   async function refreshSuggestions() {
-    const now = new Date();
-    const picks = await suggestChips({ now, limit: 3 });
+    const picks = await suggestChips({ limit: 3 });
     suggestions.innerHTML = '';
-    suggestHead.hidden = !picks.length;
     if (!picks.length) return;
-
-    const weekday = now.getDay() !== 0 && now.getDay() !== 6;
-    suggestHead.textContent =
-      `${slotLabel(slotOf(now))} · usually, on ${weekday ? 'a weekday' : 'a weekend'}`;
 
     for (const pick of picks) {
       const b = document.createElement('button');
