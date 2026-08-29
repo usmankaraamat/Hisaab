@@ -1123,6 +1123,52 @@ console.log('\n--- asking about a thing, not a category ---');
     ask2('how much did I spend this month').amountMinor, 453000);
 }
 
+/* The accent has to stay readable, in both themes and in both of its jobs.
+ *
+ * It is a fill with background-coloured text on it (Save, the active direction
+ * button) and it is text on the surface (links, "adds up to", the delta). Those
+ * pull in opposite directions, and the violet that shipped before failed: 3.5:1
+ * against the ground, where 4.5 is the floor for text that size. Nothing else
+ * would have caught it — it renders, it just cannot be read in daylight. */
+console.log('\n--- the accent is readable in both themes ---');
+{
+  const css = readFileSync(join(here, '..', 'src', 'styles.css'), 'utf8');
+  const dark = css.indexOf('prefers-color-scheme: dark');
+
+  /** The winning value of a custom property in a slice, resolving one var(). */
+  const token = (slice, name) => {
+    const hits = [...slice.matchAll(new RegExp(`--${name}:\\s*([^;]+);`, 'g'))];
+    if (!hits.length) return null;
+    const raw = hits.at(-1)[1].trim();
+    const ref = /^var\(--([\w-]+)\)$/.exec(raw);
+    return ref ? token(slice, ref[1]) : raw;
+  };
+
+  const lum = (hex) => {
+    const ch = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = ch.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((m, n) => n - m);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  for (const [label, slice] of [
+    ['light', css.slice(0, dark)],
+    ['dark', css.slice(dark)],
+  ]) {
+    const accent = token(slice, 'accent');
+    const bg = token(slice, 'bg');
+    const surface = token(slice, 'surface');
+    check(`${label}: the accent is a hex colour`, /^#[0-9a-f]{6}$/i.test(accent || ''), true);
+    // Both readings of the same number: text on the card, and the ground colour
+    // used as text on an accent fill.
+    check(`${label}: readable as text on a card`, contrast(accent, surface) >= 4.5, true);
+    check(`${label}: readable as a filled button`, contrast(accent, bg) >= 4.5, true);
+  }
+}
+
 /* A source-level check, because this one is invisible at runtime.
  *
  * `supabase()` lazily imports the SDK, so it returns a promise, not a client.

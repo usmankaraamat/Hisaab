@@ -30,7 +30,18 @@
   --text: var(--ink);
   --muted: #697482;
   --line: #dbe1e8;
-  --accent: #657af0;
+  /* The accent is asked to do two opposite jobs: it is a fill with
+     background-coloured text on it (Save, the active direction button) and it
+     is text on the surface (links, "adds up to", the under-pace delta). A
+     literal pastel therefore cannot be the light-mode accent — it would fail
+     both. This is the calm end of blue instead, dark enough for near-white text
+     to sit on and for the same colour to be read as text on white.
+
+     The violet it replaces looked restless and, less arguably, failed: 3.5:1
+     against the ground where 4.5 is the floor for text this size. Blue rather
+     than teal because teal is a hair from --positive in the dark theme, and
+     "money came in" and "the button you press" must not be the same colour. */
+  --accent: #3b6ea5;         /* 5.30:1 on the card, 4.94:1 on the ground */
   --out: var(--ink);
   --in: var(--positive);
   --danger: var(--critical);
@@ -76,7 +87,10 @@
     --text: var(--ink);
     --muted: #96a3b1;
     --line: #2a3540;
-    --accent: #8da7ff;
+    /* Dark can be a real pastel: on a near-black ground a pale blue has
+       contrast to spare (9.2:1) and is far gentler at night than the saturated
+       violet, which glowed. */
+    --accent: #9cc2e8;       /* 9.24:1 on the card, 10.20:1 on the ground */
     --out: var(--ink);
     --in: var(--positive);
     --danger: var(--critical);
