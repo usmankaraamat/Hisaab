@@ -12,6 +12,8 @@ import { setMeta, addPending } from './db/local.js';
 import { parseNotification } from './capture/notif.js';
 import { invalidate } from './capture/predict.js';
 import { parseHash, go } from './nav.js';
+import { renderIcons } from './ui/icons.js';
+import { getPendingProposalCount } from './views/review.js';
 
 const views = {
   add: renderAdd,
@@ -28,14 +30,62 @@ const views = {
 
 const view = document.querySelector('#view');
 const tabs = document.querySelector('#tabs');
+const sectionTitle = document.querySelector('#section-title');
+const moreToggle = document.querySelector('#more-toggle');
+const moreBackdrop = document.querySelector('#more-backdrop');
+const moreSheet = document.querySelector('#more-sheet');
+const moreClose = document.querySelector('#more-close');
+
+const TITLES = {
+  add: 'Add expense',
+  history: 'History',
+  spending: 'Spending',
+  overview: 'Overview',
+  ledger: 'Ledger',
+  review: 'Review inbox',
+  settings: 'Settings',
+};
+
+function setMore(open, { restoreFocus = false } = {}) {
+  moreBackdrop.hidden = !open;
+  moreToggle.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('sheet-open', open);
+  if (open) moreSheet.querySelector('button[data-tab]')?.focus();
+  else if (restoreFocus) moreToggle.focus();
+}
+
+function setReviewBadge(count) {
+  const value = Math.max(0, Number(count) || 0);
+  for (const badge of document.querySelectorAll('[data-review-badge]')) {
+    badge.hidden = value === 0;
+    badge.textContent = value > 99 ? '99+' : String(value);
+    badge.setAttribute('aria-label', `${value} review proposal${value === 1 ? '' : 's'} waiting`);
+  }
+}
+
+async function refreshReviewBadge() {
+  setReviewBadge(await getPendingProposalCount().catch(() => 0));
+}
 
 async function show() {
   const { name, params } = parseHash();
   const render = views[name] || views.add;
   for (const b of tabs.querySelectorAll('button')) {
-    b.classList.toggle('active', b.dataset.tab === name);
+    const active = b.dataset.tab === name;
+    b.classList.toggle('active', active);
+    if (active) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
   }
+  for (const b of moreSheet.querySelectorAll('button[data-tab]')) {
+    const active = b.dataset.tab === name;
+    b.classList.toggle('active', active);
+    if (active) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  }
+  sectionTitle.textContent = TITLES[name] || TITLES.add;
+  setMore(false);
   await render(view, params);
+  refreshReviewBadge();
 }
 
 tabs.addEventListener('click', (e) => {
@@ -43,6 +93,24 @@ tabs.addEventListener('click', (e) => {
   // Always through the hash, so a tab tap clears any filter a link left behind.
   if (btn) go(btn.dataset.tab);
 });
+
+moreToggle.addEventListener('click', () => setMore(moreBackdrop.hidden));
+moreClose.addEventListener('click', () => setMore(false, { restoreFocus: true }));
+moreBackdrop.addEventListener('click', (e) => {
+  if (e.target === moreBackdrop) setMore(false, { restoreFocus: true });
+});
+moreSheet.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]');
+  if (btn) go(btn.dataset.tab);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !moreBackdrop.hidden) {
+    e.preventDefault();
+    setMore(false, { restoreFocus: true });
+  }
+});
+window.addEventListener('hisaab:review-count', (e) => setReviewBadge(e.detail));
+renderIcons();
 
 window.addEventListener('hashchange', show);
 

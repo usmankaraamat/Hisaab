@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c1116" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
@@ -12,16 +12,54 @@
   </head>
   <body>
     <div id="app">
+      <header class="app-header">
+        <div class="app-heading">
+          <span class="app-kicker">Hisaab</span>
+          <h1 id="section-title">Add expense</h1>
+        </div>
+        <button type="button" id="more-toggle" class="header-action" aria-label="Open more sections"
+          aria-expanded="false" aria-controls="more-sheet">
+          <span data-icon="more"></span>
+          <span class="nav-badge" data-review-badge hidden></span>
+        </button>
+      </header>
       <main id="view"></main>
-      <nav id="tabs">
-        <button data-tab="add" class="active">Add</button>
-        <button data-tab="history">History</button>
-        <button data-tab="spending">Spending</button>
-        <button data-tab="overview">Overview</button>
-        <button data-tab="ledger">Ledger</button>
-        <button data-tab="review">Review</button>
-        <button data-tab="settings">Settings</button>
+      <nav id="tabs" aria-label="Primary sections">
+        <button type="button" data-tab="add" class="active" aria-current="page"><span class="tab-icon" data-icon="add"></span><span>Add</span></button>
+        <button type="button" data-tab="history"><span class="tab-icon" data-icon="history"></span><span>History</span></button>
+        <button type="button" data-tab="spending"><span class="tab-icon" data-icon="spending"></span><span>Spending</span></button>
+        <button type="button" data-tab="ledger"><span class="tab-icon" data-icon="ledger"></span><span>Ledger</span></button>
       </nav>
+
+      <div id="more-backdrop" class="sheet-backdrop" hidden>
+        <section id="more-sheet" class="more-sheet" role="dialog" aria-modal="true" aria-labelledby="more-title">
+          <div class="sheet-head">
+            <div>
+              <span class="app-kicker">Navigate</span>
+              <h2 id="more-title">More sections</h2>
+            </div>
+            <button type="button" id="more-close" class="icon-button" aria-label="Close more sections"><span data-icon="close"></span></button>
+          </div>
+          <div class="more-links">
+            <button type="button" data-tab="overview">
+              <span class="more-icon" data-icon="overview"></span>
+              <span><b>Overview</b><small>Trends across months, weeks, and days</small></span>
+              <span class="more-chevron" data-icon="chevron"></span>
+            </button>
+            <button type="button" data-tab="review">
+              <span class="more-icon" data-icon="review"></span>
+              <span><b>Review</b><small>Check categorisation proposals</small></span>
+              <span class="more-count nav-badge" data-review-badge hidden></span>
+              <span class="more-chevron" data-icon="chevron"></span>
+            </button>
+            <button type="button" data-tab="settings">
+              <span class="more-icon" data-icon="settings"></span>
+              <span><b>Settings</b><small>Sync, budgets, rules, and data</small></span>
+              <span class="more-chevron" data-icon="chevron"></span>
+            </button>
+          </div>
+        </section>
+      </div>
     </div>
     <script type="module" src="./src/main.js"></script>
   </body>

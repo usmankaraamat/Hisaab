@@ -84,18 +84,24 @@ export async function renderHistory(root, params) {
       <div class="h-filter">
         <input id="f-text" type="search" placeholder="Search" aria-label="Search entries"
                value="${escapeHtml(filter.text)}" spellcheck="false" />
-        <div class="h-filter-row">
-          <select id="f-cat" aria-label="Filter by category"></select>
-          <select id="f-person" aria-label="Filter by person"></select>
-        </div>
-        <div class="h-filter-row date-range">
-          <label class="stack">From
-            <input id="f-from" type="date" aria-label="From date" value="${escapeHtml(filter.from || '')}" />
-          </label>
-          <label class="stack">To
-            <input id="f-to" type="date" aria-label="To date" value="${escapeHtml(filter.to || '')}" />
-          </label>
-        </div>
+        <div class="filter-chips" id="f-chips" aria-label="Active filters" hidden></div>
+        <details class="filter-more">
+          <summary>Filters</summary>
+          <div class="filter-panel">
+            <div class="h-filter-row">
+              <select id="f-cat" aria-label="Filter by category"></select>
+              <select id="f-person" aria-label="Filter by person"></select>
+            </div>
+            <div class="h-filter-row date-range">
+              <label class="stack">From
+                <input id="f-from" type="date" aria-label="From date" value="${escapeHtml(filter.from || '')}" />
+              </label>
+              <label class="stack">To
+                <input id="f-to" type="date" aria-label="To date" value="${escapeHtml(filter.to || '')}" />
+              </label>
+            </div>
+          </div>
+        </details>
       </div>
       <div id="history-body"><p class="empty">Loading…</p></div>
     </section>
@@ -107,14 +113,16 @@ export async function renderHistory(root, params) {
   const person = root.querySelector('#f-person');
   const from = root.querySelector('#f-from');
   const to = root.querySelector('#f-to');
+  const chips = root.querySelector('#f-chips');
+  const controls = { cat, person, text, from, to, chips };
 
   from.addEventListener('change', () => {
     filter.from = from.value;
-    paint(body, { cat, person });
+    paint(body, controls);
   });
   to.addEventListener('change', () => {
     filter.to = to.value;
-    paint(body, { cat, person });
+    paint(body, controls);
   });
 
   let debounce = null;
@@ -122,19 +130,44 @@ export async function renderHistory(root, params) {
     clearTimeout(debounce);
     debounce = setTimeout(() => {
       filter.text = text.value;
-      paint(body, { cat, person });
+      paint(body, controls);
     }, 150);
   });
   cat.addEventListener('change', () => {
     filter.category = cat.value;
-    paint(body, { cat, person });
+    paint(body, controls);
   });
   person.addEventListener('change', () => {
     filter.person = person.value;
-    paint(body, { cat, person });
+    paint(body, controls);
   });
 
-  await paint(body, { cat, person });
+  await paint(body, controls);
+}
+
+function paintFilterChips(body, controls) {
+  if (!controls?.chips) return;
+  const active = [
+    filter.text ? { key: 'text', label: `Search: ${filter.text}` } : null,
+    filter.category ? { key: 'category', label: filter.category } : null,
+    filter.person ? { key: 'person', label: filter.person } : null,
+    filter.from ? { key: 'from', label: `From ${filter.from}` } : null,
+    filter.to ? { key: 'to', label: `To ${filter.to}` } : null,
+  ].filter(Boolean);
+
+  controls.chips.hidden = active.length === 0;
+  controls.chips.innerHTML = active
+    .map((item) => `<button type="button" class="filter-chip" data-clear="${item.key}" aria-label="Remove ${escapeHtml(item.label)} filter">${escapeHtml(item.label)} <span aria-hidden="true">×</span></button>`)
+    .join('');
+
+  controls.chips.onclick = (e) => {
+    const key = e.target.closest('[data-clear]')?.dataset.clear;
+    if (!key) return;
+    filter[key] = key === 'from' || key === 'to' ? '' : '';
+    const field = { text: controls.text, category: controls.cat, person: controls.person, from: controls.from, to: controls.to }[key];
+    if (field) field.value = '';
+    paint(body, controls);
+  };
 }
 
 /** ISO instant -> the "YYYY-MM-DD" a date input expects, in local time. */
@@ -224,6 +257,8 @@ async function paint(body, controls) {
     if (!controls.cat.value) filter.category = '';
     if (!controls.person.value) filter.person = '';
   }
+
+  paintFilterChips(body, controls);
 
   const shown = rows.filter(matches);
   const filtering = Boolean(filter.text || filter.category || filter.person || filter.from || filter.to);

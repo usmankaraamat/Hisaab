@@ -30,6 +30,7 @@ import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js'
 import { sparkPoints } from '../lib/chart.js';
 import { findDuplicate } from '../lib/dupes.js';
 import { learnPayee, recallPayee } from '../lib/payees.js';
+import { icon } from '../ui/icons.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,19 +51,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export async function renderAdd(root) {
   root.innerHTML = `
     <section class="capture">
-      <form id="entry-form" autocomplete="off">
-        <div class="field">
-          <input
-            id="entry-input"
-            type="text"
-            name="entry"
-            placeholder="chicken 900"
-            list="known-names"
-            enterkeyhint="done"
-            autocapitalize="sentences"
-            spellcheck="false"
-            aria-label="What did you spend on, and how much" />
-          <datalist id="known-names"></datalist>
+      <form id="entry-form" class="capture-composer" autocomplete="off">
+        <div class="composer-line">
+          <div class="field">
+            <input
+              id="entry-input"
+              type="text"
+              name="entry"
+              placeholder="chicken 900"
+              list="known-names"
+              enterkeyhint="done"
+              autocapitalize="sentences"
+              spellcheck="false"
+              aria-label="What did you spend on, and how much" />
+            <datalist id="known-names"></datalist>
+          </div>
+          <button type="submit" id="save" class="save" disabled aria-label="Save entry">${icon('arrowUp', { size: 22 })}</button>
         </div>
 
         <div class="preview" id="preview" aria-live="polite">
@@ -75,8 +79,8 @@ export async function renderAdd(root) {
         <p class="dupe" id="dupe" role="status" hidden></p>
 
         <div class="direction" role="group" aria-label="Direction">
-          <button type="button" data-dir="out" class="active">Spent</button>
-          <button type="button" data-dir="in">Received</button>
+          <button type="button" data-dir="out" class="active" aria-pressed="true">Spent</button>
+          <button type="button" data-dir="in" aria-pressed="false">Received</button>
         </div>
       </form>
 
@@ -88,8 +92,6 @@ export async function renderAdd(root) {
       <div class="suggestions" id="suggestions" aria-label="Suggestions for right now"></div>
 
       <div class="chips" id="amount-chips"></div>
-
-      <button type="submit" form="entry-form" id="save" class="save" disabled>Save</button>
 
       <div class="toast" id="toast" hidden></div>
 
@@ -300,7 +302,11 @@ export async function renderAdd(root) {
 
   function setDirection(next, { silent = false } = {}) {
     direction = next;
-    for (const b of dirButtons) b.classList.toggle('active', b.dataset.dir === next);
+    for (const b of dirButtons) {
+      const active = b.dataset.dir === next;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', String(active));
+    }
     if (!silent) refreshPreview();
   }
 
@@ -774,12 +780,14 @@ export async function renderAdd(root) {
     // the next minute; the balance behind it is context for the figure, not the
     // other way round.
     allowance.innerHTML = over
-      ? `<b>${formatMinor(-b.safeToSpendMinor)} over</b> with ${b.daysLeft} day${
-          b.daysLeft === 1 ? '' : 's'
-        } to go`
-      : `<b>${formatMinor(b.dailyMinor)} a day</b> for ${b.daysLeft} day${
-          b.daysLeft === 1 ? '' : 's'
-        } · ${formatMinor(b.safeToSpendMinor)} left`;
+      ? `<span class="allowance-kicker">Money for now</span>
+         <span class="allowance-main">${formatMinor(-b.safeToSpendMinor)} over</span>
+         <span class="allowance-detail">${b.daysLeft} day${b.daysLeft === 1 ? '' : 's'} left in this period</span>`
+      : `<span class="allowance-kicker">Money for now</span>
+         <span class="allowance-main">${formatMinor(b.dailyMinor)} <small>a day</small></span>
+         <span class="allowance-detail">${formatMinor(b.safeToSpendMinor)} safe · ${b.daysLeft} day${
+           b.daysLeft === 1 ? '' : 's'
+         } remaining</span>`;
   }
 
   async function refreshNames() {

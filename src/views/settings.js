@@ -176,6 +176,8 @@ export async function renderSettings(root) {
     </section>
   `;
 
+  organiseSettings(root);
+
   const stats = root.querySelector('#stats');
   const result = root.querySelector('#import-result');
   const account = root.querySelector('#account');
@@ -737,6 +739,36 @@ Content-Type: text/plain
     refreshSchedules(),
     refreshIngest(),
   ]);
+}
+
+function organiseSettings(root) {
+  const section = root.querySelector('.settings');
+  const cards = [...section.querySelectorAll(':scope > .card')];
+  const byTitle = new Map(cards.map((card) => [card.querySelector('h3')?.textContent.trim(), card]));
+
+  const groups = [
+    ['Account & sync', 'Your current sync state stays visible.', ['Sync'], true],
+    ['Capture intelligence', 'Optional notification forwarding and capture helpers.', ['Auto-capture (advanced)'], false],
+    ['Budget', 'Balances, savings goals, and category limits.', ['Budget', 'Savings goal', 'Category budgets'], false],
+    ['Recurring', 'Charges and income that should surface when due.', ['Recurring & reminders'], false],
+    ['Rules', 'Deterministic filing rules applied at capture.', ['Capture rules'], false],
+    ['Data & repair', 'Reconcile, import, export, and inspect local storage.', ['Count your cash', 'Import from Bluecoins', 'Export', 'Stored locally'], false],
+    ['Danger zone', 'Destructive actions are kept separate at the bottom.', ['Reset'], false],
+  ];
+
+  for (const [title, note, names, open] of groups) {
+    const details = document.createElement('details');
+    details.className = `settings-group${title === 'Danger zone' ? ' danger-zone' : ''}`;
+    if (open) details.open = true;
+    details.innerHTML = `<summary><span><b>${title}</b><small>${note}</small></span></summary>`;
+    for (const name of names) {
+      const card = byTitle.get(name);
+      if (!card) continue;
+      card.classList.add('settings-subcard');
+      details.append(card);
+    }
+    section.append(details);
+  }
 }
 
 function pad(n, w = 2) {

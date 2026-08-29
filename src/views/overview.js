@@ -213,21 +213,24 @@ function chartCard(buckets, level, crumbs, month, now) {
        </defs>
        ${grid}${bars}
      </svg>
-     ${
-       projection || anyRef || anyMixed
-         ? `<div class="ov-legend">
-             ${projection ? '<span><i class="sw ghost"></i>Projected</span>' : ''}
-             ${anyRef ? '<span><i class="sw ref"></i>Imported, reference only</span>' : ''}
-             ${
-               anyMixed
-                 ? '<span class="ov-note">Months marked “tracked only” also hold imported rows, left out of their totals.</span>'
-                 : ''
-             }
-           </div>`
-         : ''
-     }
      ${note ? `<p class="hint ov-foot">${note}</p>` : ''}
-     <div class="ov-rows">${list}</div>`
+     <details class="ov-detail">
+       <summary>Exact values and chart notes</summary>
+       ${
+         projection || anyRef || anyMixed
+           ? `<div class="ov-legend">
+               ${projection ? '<span><i class="sw ghost"></i>Projected</span>' : ''}
+               ${anyRef ? '<span><i class="sw ref"></i>Imported, reference only</span>' : ''}
+               ${
+                 anyMixed
+                   ? '<span class="ov-note">Months marked “tracked only” also hold imported rows, left out of their totals.</span>'
+                   : ''
+               }
+             </div>`
+           : ''
+       }
+       <div class="ov-rows">${list}</div>
+     </details>`
   );
 }
 

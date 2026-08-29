@@ -51,17 +51,22 @@ export async function renderSpending(root) {
   // The pot is a running balance, not a per-period figure. See lib/trends.js.
   budget.potMinor = savingsPot(rows).minor;
 
-  host.innerHTML = [
-    leftCard(budget),
-    askCard(),
-    bridgeCard(budget),
-    paceCard(rows, budget, now),
-    categoryBudgetsCard(rows, budget, budgets),
-    '<div class="card" id="breakdown-card"></div>',
-    committedCard(budget),
-    faresCard(rows),
-    pricesCard(rows),
-  ].join('');
+  const patterns = [bridgeCard(budget), paceCard(rows, budget, now), faresCard(rows), pricesCard(rows)]
+    .filter(Boolean)
+    .join('');
+  host.innerHTML = `
+    <section class="dashboard-level right-now">
+      <div class="dashboard-heading"><span>Right now</span><p>The figures that shape the next decision.</p></div>
+      ${leftCard(budget)}
+      ${committedCard(budget)}
+    </section>
+    <section class="dashboard-level where-it-went">
+      <div class="dashboard-heading"><span>Where it went</span><p>Ask the ledger or inspect the exact entries.</p></div>
+      ${askCard()}
+      ${categoryBudgetsCard(rows, budget, budgets)}
+      <div class="card" id="breakdown-card"></div>
+    </section>
+    ${patterns ? `<details class="dashboard-level patterns"><summary><span>Patterns</span><small>Pace, cash bridge, fares, and price changes</small></summary><div class="dashboard-detail">${patterns}</div></details>` : ''}`;
 
   // The breakdown carries its own date range, defaulting to this period, so the
   // same screen answers "where did it go this month" and "where did it go in
@@ -487,18 +492,17 @@ function paintBreakdown(hostEl, rows, b, range) {
 
 function committedCard(b) {
   const subs = b.committed;
+  if (!subs.length) return '';
   return card(
     'Still to come',
-    subs.length
-      ? subs
-          .map((s) =>
-            row(
-              `${escapeHtml(s.label)}<small>${s.cadence} · due ${DATE.format(new Date(s.nextDue))}</small>`,
-              formatMinor(s.lastMinor)
-            )
-          )
-          .join('')
-      : '<p class="empty">No recurring charges due before your next income.</p>',
+    subs
+      .map((s) =>
+        row(
+          `${escapeHtml(s.label)}<small>${s.cadence} · due ${DATE.format(new Date(s.nextDue))}</small>`,
+          formatMinor(s.lastMinor)
+        )
+      )
+      .join(''),
     'Recurring charges already subtracted from what is safe to spend.'
   );
 }

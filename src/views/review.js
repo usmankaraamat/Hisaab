@@ -13,6 +13,19 @@ import { invalidate } from '../capture/predict.js';
 
 const CONFIDENT = 0.7;
 
+export async function getPendingProposalCount() {
+  if (!isConfigured()) return 0;
+  const user = await currentUser();
+  if (!user) return 0;
+  const sb = await supabase();
+  const { count, error } = await sb
+    .from('enrichment_proposals')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending');
+  if (error) return 0;
+  return count ?? 0;
+}
+
 export async function renderReview(root) {
   root.innerHTML = `
     <section class="review">
@@ -55,6 +68,7 @@ async function paint(body) {
   }
 
   const waiting = proposals ?? [];
+  window.dispatchEvent(new CustomEvent('hisaab:review-count', { detail: waiting.length }));
   const confident = waiting.filter((p) => (p.confidence ?? 0) >= CONFIDENT);
   const uncertain = waiting.filter((p) => (p.confidence ?? 0) < CONFIDENT);
 
@@ -139,18 +153,23 @@ function card(p, body) {
     prop.counterparty ? `${prop.counterparty}${prop.ledger_effect ? ` (${prop.ledger_effect.replace('_', ' ')})` : ''}` : null,
   ].filter(Boolean);
 
-  const el = document.createElement('div');
+  const el = document.createElement('details');
   el.className = 'proposal';
   el.innerHTML = `
-    <div class="p-head">
-      <span class="p-raw">${escapeHtml(t.raw_name ?? '')}</span>
-      <span class="p-amt">${t.amount_minor != null ? formatMinor(t.amount_minor) : ''}</span>
-    </div>
-    <div class="p-tags">${bits.map((b) => `<span class="tag">${escapeHtml(b)}</span>`).join('')}</div>
-    <div class="p-actions">
-      <span class="p-conf">${p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</span>
-      <button type="button" data-act="reject">Reject</button>
-      <button type="button" data-act="accept">Accept</button>
+    <summary>
+      <span class="p-head">
+        <span class="p-raw">${escapeHtml(t.raw_name ?? '')}</span>
+        <span class="p-amt">${t.amount_minor != null ? formatMinor(t.amount_minor) : ''}</span>
+      </span>
+      <span class="p-conf">${p.confidence != null ? `${Math.round(p.confidence * 100)}% confidence` : 'Needs review'}</span>
+    </summary>
+    <div class="proposal-body">
+      <span class="proposal-label">Proposed changes</span>
+      <div class="p-tags">${bits.map((b) => `<span class="tag">${escapeHtml(b)}</span>`).join('')}</div>
+      <div class="p-actions">
+        <button type="button" data-act="reject">Reject</button>
+        <button type="button" data-act="accept">Accept</button>
+      </div>
     </div>`;
 
   el.addEventListener('click', async (e) => {
