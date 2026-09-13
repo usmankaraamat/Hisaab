@@ -34,20 +34,21 @@ export async function renderSpending(root) {
   root.innerHTML = '<section class="spending"><h2>Spending</h2><div id="spend-body"></div></section>';
   const host = root.querySelector('#spend-body');
 
-  const [rows, opening, target, budgets] = await Promise.all([
+  const [rows, opening, target, budgets, funding] = await Promise.all([
     allTransactions(),
     getMeta('budget.opening', null),
     getMeta('budget.savingsTarget', 0),
     getMeta('budget.categories', {}),
+    getMeta('budget.funding', null),
   ]);
 
-  if (!rows.length) {
+  if (!rows.length && !funding) {
     host.innerHTML = '<p class="empty">Nothing to analyse yet.</p>';
     return;
   }
 
   const now = new Date();
-  const budget = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, now });
+  const budget = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, funding, now });
   // The pot is a running balance, not a per-period figure. See lib/trends.js.
   budget.potMinor = savingsPot(rows).minor;
 
@@ -73,7 +74,9 @@ export async function renderSpending(root) {
   // March". It repaints in place as the range changes; the other cards are
   // period-fixed and rendered once.
   const breakdownHost = host.querySelector('#breakdown-card');
-  const range = { from: toDateInput(budget.since), to: '' };
+  // A funding snapshot anchors balances only. Spending remains a monthly report,
+  // including purchases made before the snapshot on the setup day.
+  const range = { from: toDateInput(budget.funding ? budget.periodStart : budget.since), to: '' };
   paintBreakdown(breakdownHost, rows, budget, range);
 
   wireAsk(host, rows, now);
@@ -170,6 +173,10 @@ function row(label, value, cls = '') {
   return `<div class="row"><span>${label}</span><span class="num ${cls}">${value}</span></div>`;
 }
 
+function signedMinor(minor) {
+  return formatMinor(minor, { sign: minor < 0 ? '−' : '' });
+}
+
 /**
  * The headline. `safeToSpend` is deliberately the big number rather than cash:
  * cash includes rent that has not been charged yet and a savings target not yet
@@ -177,6 +184,29 @@ function row(label, value, cls = '') {
  * is exactly the figure that leads to overspending.
  */
 function leftCard(b) {
+  if (b.funding) {
+    const short = b.essentialMinor < 0;
+    return card(
+      'Essential money left',
+      `<div class="big ${short ? 'down' : ''}">${signedMinor(b.essentialMinor)}</div>
+       <p class="big-sub">in your essential account</p>
+       ${row('Other bank money', signedMinor(b.otherMinor))}
+       ${row('Total across both', signedMinor(b.cashMinor))}
+       ${b.committedMinor ? row('Bills still due', `− ${formatMinor(b.committedMinor)}`, 'up') : ''}
+       ${
+         b.savingsTargetMinor
+           ? row(
+               b.savingsRemainingMinor ? 'Still to set aside this period' : 'Set aside this period',
+               b.savingsRemainingMinor ? `− ${formatMinor(b.savingsRemainingMinor)}` : `${formatMinor(b.savedMinor)} ✓`,
+               b.savingsRemainingMinor ? '' : 'down'
+             )
+           : ''
+       }
+       ${ledgerLine(b)}`,
+      'New expenses use Essential. In History, tap Mark non-essential beside a transaction to move it to Other bank money.'
+    );
+  }
+
   if (b.anchoredTo === 'none') {
     return card(
       'Money left',
@@ -250,7 +280,7 @@ function bridgeCard(b) {
   if (b.iOweMinor) steps.push({ label: 'You owe', minor: -b.iOweMinor });
   if (!steps.length) return '';
 
-  const { y, bars, levels } = bridgeLayout({ startMinor: b.cashMinor, steps }, { frame: WF });
+  const { y, bars, levels } = bridgeLayout({ startMinor: b.funding ? b.essentialMinor : b.cashMinor, steps }, { frame: WF });
   const labelFor = (bar, i) =>
     i === 0 ? 'Wallet' : i === bars.length - 1 ? 'Safe' : bar.label;
 
@@ -418,7 +448,7 @@ function paceCard(rows, b, now) {
  * shown only while the range is the default one it describes.
  */
 function paintBreakdown(hostEl, rows, b, range) {
-  const isDefault = range.from === toDateInput(b.since) && !range.to;
+  const isDefault = range.from === toDateInput(b.funding ? b.periodStart : b.since) && !range.to;
   const from = startOfDay(range.from);
   const to = endOfDay(range.to);
   const spend = categoryTotals(rows, { from, to });

@@ -6,12 +6,15 @@ import {
   countTransactions,
   countEvents,
   resetAll,
+  setFundingSnapshot,
   getMeta,
   setMeta,
   newId,
 } from '../db/local.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { budgetSummary, RECONCILE } from '../lib/budget.js';
+import { isFundingSnapshot } from '../lib/funding.js';
+import { makeFundingTransfer } from '../lib/transfers.js';
 import { SPEND_CATEGORIES, CATEGORIES } from '../lib/categories.js';
 import { invalidate } from '../capture/predict.js';
 import { isConfigured, currentUser, signIn, signOut } from '../db/supabase.js';
@@ -20,7 +23,7 @@ import { ensureIngestToken } from '../db/ingest.js';
 import { escapeHtml } from '../capture/entry.js';
 import { ACCENTS, currentAccent, setAccent } from '../ui/theme.js';
 
-export async function renderSettings(root) {
+export async function renderSettings(root, params) {
   root.innerHTML = `
     <section class="settings">
       <h2>Settings</h2>
@@ -59,6 +62,40 @@ export async function renderSettings(root) {
         <p id="budget-msg" class="hint"></p>
         <button type="button" id="save-budget">Save</button>
         <button type="button" id="clear-opening">Clear opening balance</button>
+      </div>
+
+      <div class="card">
+        <h3>Essential balance</h3>
+        <p class="hint">
+          Keep the account you use for everyday essentials separate from money parked in
+          the bank. Enter both balances as they stand now. This takes a snapshot: entries
+          before setup remain history and do not change either balance. Starting balances
+          sync with your signed-in account after the first successful sync.
+        </p>
+        <label class="stack">Essential account now
+          <input type="text" id="funding-essential" inputmode="decimal" placeholder="e.g. 42000" />
+        </label>
+        <label class="stack">Other bank money now
+          <input type="text" id="funding-other" inputmode="decimal" placeholder="e.g. 180000" />
+        </label>
+        <p id="funding-at" class="hint"></p>
+        <p id="funding-msg" class="hint"></p>
+        <button type="button" id="save-funding">Save balances</button>
+        <div id="funding-transfer" hidden>
+          <h4>Move money between balances</h4>
+          <p class="hint">Record a top-up once. It changes the two balances, never your spending or total money.</p>
+          <label class="stack">Move from
+            <select id="transfer-from">
+              <option value="other">Other bank money → Essential</option>
+              <option value="essential">Essential → Other bank money</option>
+            </select>
+          </label>
+          <label class="stack">Amount
+            <input type="text" id="transfer-amount" inputmode="decimal" placeholder="e.g. 10000" />
+          </label>
+          <p id="transfer-msg" class="hint"></p>
+          <button type="button" id="save-transfer">Move money</button>
+        </div>
       </div>
 
       <div class="card">
@@ -145,6 +182,12 @@ export async function renderSettings(root) {
         <p id="recon-now" class="hint"></p>
         <label class="stack">What you actually have
           <input type="text" id="recon-amount" inputmode="decimal" placeholder="count it" />
+        </label>
+        <label class="stack" id="recon-source-wrap" hidden>Balance counted
+          <select id="recon-source">
+            <option value="essential">Essential account</option>
+            <option value="other">Other bank money</option>
+          </select>
         </label>
         <p id="recon-msg" class="hint"></p>
         <button type="button" id="do-recon">Reconcile</button>
@@ -234,6 +277,45 @@ export async function renderSettings(root) {
   const openingAt = root.querySelector('#opening-at');
   const targetInput = root.querySelector('#target');
   const budgetMsg = root.querySelector('#budget-msg');
+  const fundingEssential = root.querySelector('#funding-essential');
+  const fundingOther = root.querySelector('#funding-other');
+  const fundingAt = root.querySelector('#funding-at');
+  const fundingMsg = root.querySelector('#funding-msg');
+  const saveFunding = root.querySelector('#save-funding');
+  const transferBox = root.querySelector('#funding-transfer');
+  const transferFrom = root.querySelector('#transfer-from');
+  const transferAmount = root.querySelector('#transfer-amount');
+  const transferMsg = root.querySelector('#transfer-msg');
+  const saveTransfer = root.querySelector('#save-transfer');
+
+  async function refreshFunding() {
+    const [funding, rows, opening, target] = await Promise.all([
+      getMeta('budget.funding', null),
+      allTransactions(),
+      getMeta('budget.opening', null),
+      getMeta('budget.savingsTarget', 0),
+    ]);
+    const configured = isFundingSnapshot(funding);
+    const balances = configured
+      ? budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, funding })
+      : null;
+    fundingEssential.value = configured ? String(balances.essentialMinor / 100) : '';
+    fundingOther.value = configured ? String(balances.otherMinor / 100) : '';
+    fundingEssential.disabled = configured;
+    fundingOther.disabled = configured;
+    saveFunding.hidden = configured;
+    transferBox.hidden = !configured;
+    fundingAt.textContent = configured
+      ? `Set on ${new Date(funding.at).toLocaleString()}. These are your live balances. Use Count your cash to correct either one; marking a newer entry as non-essential moves its amount between them. Older entries stay as historical records.`
+      : 'Not set. Until you save this, the app uses the original single-balance budget.';
+
+    // There must be one balance anchor. The split snapshot is the newer, more
+    // specific model, so leaving opening editable here would make two answers.
+    openingInput.disabled = configured;
+    openingInput.closest('label').hidden = configured;
+    openingAt.hidden = configured;
+    root.querySelector('#clear-opening').hidden = configured;
+  }
 
   async function refreshBudget() {
     const [opening, target] = await Promise.all([
@@ -248,10 +330,11 @@ export async function renderSettings(root) {
   }
 
   root.querySelector('#save-budget').addEventListener('click', async () => {
+    const funding = await getMeta('budget.funding', null);
     const openingMinor = openingInput.value.trim() ? toMinor(openingInput.value) : null;
     const targetMinor = targetInput.value.trim() ? toMinor(targetInput.value) : 0;
 
-    if (openingInput.value.trim() && (openingMinor === null || openingMinor < 0)) {
+    if (!funding && openingInput.value.trim() && (openingMinor === null || openingMinor < 0)) {
       budgetMsg.className = 'warn';
       budgetMsg.textContent = 'That opening balance is not a number.';
       return;
@@ -263,7 +346,10 @@ export async function renderSettings(root) {
     }
 
     const existing = await getMeta('budget.opening', null);
-    if (openingMinor === null) {
+    if (funding) {
+      // The split snapshot owns the balance anchor. The period target remains
+      // useful, so saving it must not be blocked by the separate setup.
+    } else if (openingMinor === null) {
       await setMeta('budget.opening', null);
     } else if (!existing || existing.amountMinor !== openingMinor) {
       // Re-stamped only when the figure actually changed, so re-saving the page
@@ -275,6 +361,72 @@ export async function renderSettings(root) {
     await refreshBudget();
     budgetMsg.className = 'ok';
     budgetMsg.textContent = 'Saved.';
+  });
+
+  saveFunding.addEventListener('click', async () => {
+    if (saveFunding.disabled) return;
+    const essentialMinor = toMinor(fundingEssential.value);
+    const otherMinor = toMinor(fundingOther.value);
+    if (essentialMinor === null || essentialMinor < 0 || otherMinor === null || otherMinor < 0) {
+      fundingMsg.className = 'warn';
+      fundingMsg.textContent = 'Enter both current balances as zero or a positive amount.';
+      return;
+    }
+
+    saveFunding.disabled = true;
+    try {
+      const user = isConfigured() ? await currentUser() : null;
+      await setFundingSnapshot(
+        { essentialMinor, otherMinor, at: new Date().toISOString() },
+        { ownerId: user?.id ?? null }
+      );
+      await refreshFunding();
+      fundingMsg.className = 'ok';
+      fundingMsg.textContent = 'Saved. New purchases draw from Essential until you mark one non-essential in History.';
+      invalidate();
+      syncNow().catch(() => {});
+    } catch (err) {
+      fundingMsg.className = 'warn';
+      fundingMsg.textContent = `Could not save balances: ${err.message}`;
+    } finally {
+      saveFunding.disabled = false;
+    }
+  });
+
+  saveTransfer.addEventListener('click', async () => {
+    if (saveTransfer.disabled) return;
+    const amountMinor = toMinor(transferAmount.value);
+    if (amountMinor === null || amountMinor <= 0) {
+      transferMsg.className = 'warn';
+      transferMsg.textContent = 'Enter an amount above zero.';
+      return;
+    }
+    saveTransfer.disabled = true;
+    try {
+      const [funding, rows, opening, target] = await Promise.all([
+        getMeta('budget.funding', null),
+        allTransactions(),
+        getMeta('budget.opening', null),
+        getMeta('budget.savingsTarget', 0),
+      ]);
+      if (!isFundingSnapshot(funding)) throw new Error('Set the two starting balances first.');
+      const b = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, funding });
+      const available = transferFrom.value === 'essential' ? b.essentialMinor : b.otherMinor;
+      if (amountMinor > available) throw new Error(`Only ${formatMinor(Math.max(0, available))} is available in that balance.`);
+      const at = new Date().toISOString();
+      await addTransaction(makeFundingTransfer({ from: transferFrom.value, amountMinor, occurredAt: at }));
+      transferAmount.value = '';
+      invalidate();
+      syncNow().catch(() => {});
+      await Promise.all([refreshFunding(), refreshRecon()]);
+      transferMsg.className = 'ok';
+      transferMsg.textContent = 'Moved. Your total money is unchanged.';
+    } catch (err) {
+      transferMsg.className = 'warn';
+      transferMsg.textContent = err.message;
+    } finally {
+      saveTransfer.disabled = false;
+    }
   });
 
   /* Savings goal.
@@ -330,17 +482,26 @@ export async function renderSettings(root) {
   const reconAmount = root.querySelector('#recon-amount');
   const reconNow = root.querySelector('#recon-now');
   const reconMsg = root.querySelector('#recon-msg');
+  const reconSourceWrap = root.querySelector('#recon-source-wrap');
+  const reconSource = root.querySelector('#recon-source');
 
   async function refreshRecon() {
-    const [rows, opening, target] = await Promise.all([
+    const [rows, opening, target, funding] = await Promise.all([
       allTransactions(),
       getMeta('budget.opening', null),
       getMeta('budget.savingsTarget', 0),
+      getMeta('budget.funding', null),
     ]);
-    const b = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0 });
+    const b = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, funding });
+    reconSourceWrap.hidden = !b.funding;
     const last = await getMeta('budget.lastReconciled', null);
+    const source = b.funding ? reconSource.value : 'essential';
+    const trackedMinor = b.funding
+      ? (source === 'other' ? b.otherMinor : b.essentialMinor)
+      : b.cashMinor;
+    const sourceLabel = source === 'other' ? 'other bank money' : 'essential account';
     reconNow.textContent =
-      `The app thinks you have ${formatMinor(b.cashMinor)}.` +
+      `The app thinks your ${b.funding ? sourceLabel : 'cash'} is ${formatMinor(trackedMinor)}.` +
       (last
         ? ` Last counted ${new Date(last.at).toLocaleDateString()}, ${
             last.driftMinor === 0
@@ -348,49 +509,62 @@ export async function renderSettings(root) {
               : `${formatMinor(Math.abs(last.driftMinor))} ${last.driftMinor > 0 ? 'more' : 'less'} than tracked`
           }.`
         : '');
-    return b;
+    return { b, trackedMinor, source, sourceLabel };
   }
 
-  root.querySelector('#do-recon').addEventListener('click', async () => {
+  reconSource.addEventListener('change', () => { refreshRecon().catch(() => {}); });
+
+  const doRecon = root.querySelector('#do-recon');
+  doRecon.addEventListener('click', async () => {
+    if (doRecon.disabled) return;
     const actualMinor = toMinor(reconAmount.value);
     if (actualMinor === null || actualMinor < 0) {
       reconMsg.className = 'warn';
       reconMsg.textContent = 'Enter what you counted.';
       return;
     }
-    const before = await refreshRecon();
-    const driftMinor = actualMinor - before.cashMinor;
-    const at = new Date().toISOString();
+    doRecon.disabled = true;
+    try {
+      const before = await refreshRecon();
+      const driftMinor = actualMinor - before.trackedMinor;
+      const at = new Date().toISOString();
 
     // The correction is a real, visible transaction so the balance stays
     // honest without moving the period. It is stamped as already enriched so
     // the model never re-files it out of the Reconcile category the budget maths
     // keys on.
-    if (driftMinor !== 0) {
-      const rec = await addTransaction({
-        raw_name: 'Reconcile cash',
-        amount_minor: Math.abs(driftMinor),
-        direction: driftMinor > 0 ? 'in' : 'out',
-        category: RECONCILE,
-        occurred_at: at,
-      });
-      await updateTransaction(rec.id, { enriched: 1, enriched_at: at });
-    }
+      if (driftMinor !== 0) {
+        const rec = await addTransaction({
+          raw_name: 'Reconcile cash',
+          amount_minor: Math.abs(driftMinor),
+          direction: driftMinor > 0 ? 'in' : 'out',
+          category: RECONCILE,
+          occurred_at: at,
+          funding_source: before.b.funding ? before.source : undefined,
+        });
+        await updateTransaction(rec.id, { enriched: 1, enriched_at: at });
+      }
 
-    await setMeta('budget.lastReconciled', { at, driftMinor, actualMinor });
-    reconAmount.value = '';
-    invalidate();
-    syncNow().catch(() => {});
-    await Promise.all([refreshBudget(), refreshRecon()]);
-    reconMsg.className = 'ok';
-    reconMsg.textContent =
-      driftMinor === 0
-        ? 'Exactly right. Nothing to adjust.'
-        : `Adjusted by ${formatMinor(Math.abs(driftMinor))} — you had ${
-            driftMinor > 0 ? 'more' : 'less'
-          } than tracked, recorded as a "Reconcile cash" ${
-            driftMinor > 0 ? 'credit' : 'charge'
-          }.`;
+      await setMeta('budget.lastReconciled', { at, driftMinor, actualMinor, fundingSource: before.source });
+      reconAmount.value = '';
+      invalidate();
+      syncNow().catch(() => {});
+    await Promise.all([refreshBudget(), refreshFunding(), refreshRecon()]);
+      reconMsg.className = 'ok';
+      reconMsg.textContent =
+        driftMinor === 0
+          ? 'Exactly right. Nothing to adjust.'
+          : `Adjusted your ${before.sourceLabel} by ${formatMinor(Math.abs(driftMinor))} — you had ${
+              driftMinor > 0 ? 'more' : 'less'
+            } than tracked, recorded as a "Reconcile cash" ${
+              driftMinor > 0 ? 'credit' : 'charge'
+            }.`;
+    } catch (err) {
+      reconMsg.className = 'warn';
+      reconMsg.textContent = `Could not reconcile: ${err.message}`;
+    } finally {
+      doRecon.disabled = false;
+    }
   });
 
   root.querySelector('#clear-opening').addEventListener('click', async () => {
@@ -774,6 +948,7 @@ Content-Type: text/plain
     refreshStats(),
     refreshAccount(),
     refreshBudget(),
+    refreshFunding(),
     refreshGoal(),
     refreshRecon(),
     refreshCatBudgets(),
@@ -781,6 +956,12 @@ Content-Type: text/plain
     refreshSchedules(),
     refreshIngest(),
   ]);
+
+  if (params?.get('focus') === 'transfer') {
+    const section = transferBox.closest('details');
+    if (section) section.open = true;
+    (transferBox.hidden ? fundingEssential : transferAmount).focus();
+  }
 }
 
 function organiseSettings(root) {
@@ -792,7 +973,7 @@ function organiseSettings(root) {
     ['Account & sync', 'Your current sync state stays visible.', ['Sync'], true],
     ['Capture intelligence', 'Optional notification forwarding and capture helpers.', ['Auto-capture (advanced)'], false],
     ['Appearance', 'How the app looks on this device.', ['Accent colour'], false],
-    ['Budget', 'Balances, savings goals, and category limits.', ['Budget', 'Savings goal', 'Category budgets'], false],
+    ['Budget', 'Balances, savings goals, and category limits.', ['Essential balance', 'Budget', 'Savings goal', 'Category budgets'], false],
     ['Recurring', 'Charges and income that should surface when due.', ['Recurring & reminders'], false],
     ['Rules', 'Deterministic filing rules applied at capture.', ['Capture rules'], false],
     ['Data & repair', 'Reconcile, import, export, and inspect local storage.', ['Count your cash', 'Import from Bluecoins', 'Export', 'Stored locally'], false],

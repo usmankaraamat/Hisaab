@@ -150,7 +150,13 @@ export function rankSuggestions(rows, { now = new Date(), limit = 3 } = {}) {
   const slot = slotOf(now);
   const days = referenceDays(now);
 
-  const spends = rows.filter((r) => r.direction === 'out' && groupKey(r.raw_name) !== 'item:');
+  const spends = rows.filter(
+    (r) =>
+      r.direction === 'out' &&
+      r.category !== 'Reconcile' &&
+      r.source !== 'funding_transfer' &&
+      groupKey(r.raw_name) !== 'item:'
+  );
   // Timestamps are stored as UTC ISO, so both the slot and the day have to be
   // read back through the local clock — a 1am entry in PKT is the previous
   // UTC day, and slicing the string would file it under the wrong one.
@@ -179,7 +185,7 @@ export async function knownNames(limit = 300) {
   const counts = new Map();
   for (const r of rows) {
     const name = (r.raw_name || '').trim();
-    if (!name) continue;
+    if (!name || r.category === 'Reconcile' || r.source === 'funding_transfer') continue;
     counts.set(name, (counts.get(name) || 0) + 1);
   }
   return [...counts.entries()]

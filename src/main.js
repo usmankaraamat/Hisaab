@@ -145,9 +145,9 @@ pullInbox().then((r) => {
 startAutoSync(async (result) => {
   if (!result || result.error || result.skipped) return;
   await setMeta('sync.lastRun', new Date().toISOString());
-  if (result.pulled > 0) {
+  if (result.fundingAdopted || (result.pulled > 0 && parseHash().name !== 'settings')) {
     invalidate();
-    if (parseHash().name !== 'settings') await show();
+    await show();
   }
   // Piggyback the inbox pull on the same cadence as sync.
   const ingest = await pullInbox().catch(() => null);

@@ -151,6 +151,7 @@ function makeTransaction({
   category = null,
   counterparty_name = null,
   ledger_effect = null,
+  funding_source = null,
   split_group_id = null,
   split_size = null,
   source_text = null,
@@ -176,6 +177,9 @@ function makeTransaction({
     split_size,
     counterparty_name,
     ledger_effect,
+    // Old rows did not carry a source. Leaving it absent preserves that shape;
+    // every consumer treats absence as the essential account.
+    funding_source: funding_source === 'other' ? 'other' : funding_source === 'essential' ? 'essential' : null,
     ledger_settled: 0,
 
     // Everything below is filled in later by the enrichment pass.
@@ -493,6 +497,46 @@ export async function setMeta(key, value) {
   const db = await openDB();
   const { t, done } = tx(db, ['meta'], 'readwrite');
   t.objectStore('meta').put({ key, value });
+  await done;
+}
+
+// Funding uses ordinary meta storage offline, with a separate remembered
+// account id so a browser profile shared by two logins cannot leak a previous
+// user's starting balances into the next account's cloud row.
+export const FUNDING_META = 'budget.funding';
+export const FUNDING_OWNER_META = 'budget.funding.ownerId';
+
+export async function fundingSnapshotState() {
+  if (PREVIEW()) {
+    return {
+      snapshot: window.__meta?.[FUNDING_META] ?? null,
+      ownerId: window.__meta?.[FUNDING_OWNER_META] ?? null,
+    };
+  }
+  const db = await openDB();
+  const { t } = tx(db, ['meta'], 'readonly');
+  const store = t.objectStore('meta');
+  const [snapshot, owner] = await Promise.all([req(store.get(FUNDING_META)), req(store.get(FUNDING_OWNER_META))]);
+  return { snapshot: snapshot?.value ?? null, ownerId: owner?.value ?? null };
+}
+
+export async function setFundingSnapshot(snapshot, { ownerId = null } = {}) {
+  if (PREVIEW()) {
+    window.__meta = {
+      ...(window.__meta || {}),
+      [FUNDING_META]: snapshot,
+      [FUNDING_OWNER_META]: ownerId,
+    };
+    return;
+  }
+  // Snapshot and owner are one security boundary. A browser crash between two
+  // generic meta writes could otherwise make an old account's count look like
+  // an unowned legacy setup on the next login.
+  const db = await openDB();
+  const { t, done } = tx(db, ['meta'], 'readwrite');
+  const store = t.objectStore('meta');
+  store.put({ key: FUNDING_META, value: snapshot });
+  store.put({ key: FUNDING_OWNER_META, value: ownerId });
   await done;
 }
 

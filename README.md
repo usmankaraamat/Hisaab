@@ -176,6 +176,28 @@ someone four things and meaning one of them as a gift is ordinary.
 
 ## What is left
 
+### Essential money and other bank money
+
+If the money you use for groceries, rides and everyday essentials is separate
+from money parked in the bank, set both current balances once in **Settings →
+Essential balance**. That creates a timestamped snapshot. From then on the app
+shows the live **Essential**, **Other bank money**, and their **Total** on the
+Spending screen. New entries draw from Essential by default. In History, tap
+the **Essential** chip beside a newer transaction to move it to Other bank
+money; tap it again to move it back. This changes which balance paid for the
+entry, not its category or spending totals.
+
+When you top up the everyday account, use **Move money between balances** in
+that same setting. It writes one atomic transfer, defaulting from Other bank
+money to Essential, so the two balances move while total money, income, and
+spending remain unchanged. Delete that one History row to undo the move.
+
+Rows before the snapshot are deliberately historical: they show “Before balance
+setup” and cannot be moved, because applying old purchases to a balance stated
+today would double-count them. Use the source selector in **Count your cash** to
+reconcile Essential or Other separately. After the first successful account
+sync, the starting snapshot follows the account to your other devices.
+
 The question that made tracking worth starting — *how much do I have?* — is not
 one number. In three months of live data, 83,300 of 121,676 rupees "spent" was an
 investment, a remittance and a loan. A balance that treats those as consumption

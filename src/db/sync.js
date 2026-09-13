@@ -10,13 +10,17 @@
  */
 
 import { supabase, currentUser, isConfigured } from './supabase.js';
-import { unsynced, markSynced, upsertFromServer, getMeta, setMeta } from './local.js';
+import {
+  unsynced, markSynced, upsertFromServer, getMeta, setMeta,
+  fundingSnapshotState, setFundingSnapshot,
+} from './local.js';
+import { syncFundingSnapshot } from './funding-sync.js';
 
 const CURSOR = 'sync.cursor';
 const PAGE = 500;
 
 /** Local record -> server row. Drops the local-only index helpers. */
-function toRow(rec, userId) {
+export function transactionToSyncRow(rec, userId) {
   return {
     id: rec.id,
     user_id: userId,
@@ -33,6 +37,7 @@ function toRow(rec, userId) {
     counterparty_id: rec.counterparty_id ?? null,
     counterparty_name: rec.counterparty_name ?? null,
     ledger_effect: rec.ledger_effect ?? null,
+    funding_source: rec.funding_source === 'other' ? 'other' : rec.funding_source === 'essential' ? 'essential' : null,
     ledger_settled: Boolean(rec.ledger_settled),
     split_group_id: rec.split_group_id ?? null,
     split_size: rec.split_size ?? null,
@@ -47,7 +52,7 @@ function toRow(rec, userId) {
 }
 
 /** Server row -> local record. Booleans become 0/1 so they stay indexable. */
-function fromRow(row) {
+export function transactionFromSyncRow(row) {
   return {
     id: row.id,
     occurred_at: row.occurred_at,
@@ -63,6 +68,7 @@ function fromRow(row) {
     counterparty_id: row.counterparty_id,
     counterparty_name: row.counterparty_name ?? null,
     ledger_effect: row.ledger_effect,
+    funding_source: row.funding_source === 'other' ? 'other' : row.funding_source === 'essential' ? 'essential' : null,
     ledger_settled: row.ledger_settled ? 1 : 0,
     split_group_id: row.split_group_id ?? null,
     split_size: row.split_size ?? null,
@@ -93,8 +99,16 @@ export async function push() {
     const batch = pending.slice(i, i + PAGE);
     const { error } = await sb
       .from('transactions')
-      .upsert(batch.map((r) => toRow(r, user.id)), { onConflict: 'id' });
-    if (error) throw error;
+      .upsert(batch.map((r) => transactionToSyncRow(r, user.id)), { onConflict: 'id' });
+    if (error) {
+      // Do not quietly omit the field for an older Supabase project. That would
+      // make a transaction switch accounts on another device, which is worse
+      // than a visible sync failure.
+      if (error.code === '42703' || /funding_source/i.test(error.message || '')) {
+        throw new Error('Sync needs migration 0006_funding.sql applied to Supabase before funding sources can sync.');
+      }
+      throw error;
+    }
 
     await markSynced(batch.map((r) => r.id), startedAt);
     pushed += batch.length;
@@ -122,7 +136,7 @@ export async function pull() {
     if (error) throw error;
     if (!data?.length) break;
 
-    await upsertFromServer(data.map(fromRow));
+    await upsertFromServer(data.map(transactionFromSyncRow));
     pulled += data.length;
 
     const last = data[data.length - 1].updated_at;
@@ -138,6 +152,40 @@ export async function pull() {
   return { pulled };
 }
 
+/** Synchronise the write-once starting balances before ordinary rows. */
+export async function syncFundingSettings(sb, user) {
+  const local = await fundingSnapshotState();
+  let result;
+  try {
+    result = await syncFundingSnapshot({
+      client: sb,
+      userId: user?.id ?? null,
+      localSnapshot: local.snapshot,
+      rememberedOwnerId: local.ownerId,
+    });
+  } catch (error) {
+    // Do not silently treat a pre-0007 project as an empty cloud snapshot: it
+    // would leave two devices with unrelated balances. Network errors remain
+    // ordinary errors and leave the local pending snapshot untouched.
+    if (error?.code === 'PGRST202' || /establish_funding_settings/i.test(error?.message || '')) {
+      throw new Error('Sync needs migration 0007_funding_settings.sql applied to Supabase before starting balances can sync.');
+    }
+    throw error;
+  }
+  if (result.skipped) return { adopted: false };
+
+  if (result.snapshot) {
+    const changed = JSON.stringify(local.snapshot) !== JSON.stringify(result.snapshot) || local.ownerId !== result.ownerId;
+    await setFundingSnapshot(result.snapshot, { ownerId: result.ownerId });
+    return { adopted: changed };
+  }
+  if (result.clearLocal) {
+    await setFundingSnapshot(null);
+    return { adopted: true };
+  }
+  return { adopted: false };
+}
+
 let inFlight = null;
 
 /** Push then pull. Concurrent calls share the one run. */
@@ -145,9 +193,13 @@ export function syncNow() {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     if (!isConfigured() || !navigator.onLine) return { pushed: 0, pulled: 0, skipped: true };
+    const sb = await supabase();
+    const user = await currentUser();
+    if (!sb || !user) return { pushed: 0, pulled: 0, fundingAdopted: false, skipped: true };
+    const funding = await syncFundingSettings(sb, user);
     const { pushed } = await push();
     const { pulled } = await pull();
-    return { pushed, pulled, skipped: false };
+    return { pushed, pulled, fundingAdopted: funding.adopted, skipped: false };
   })().finally(() => {
     inFlight = null;
   });

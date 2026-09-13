@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/check-build.mjs",
     "preview": "vite preview",
-    "verify": "node scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs && node scripts/verify-funding.mjs && node scripts/verify-funding-sync.mjs",
     "eval": "node scripts/eval/run.mjs",
     "eval:scale": "node scripts/eval/scale.mjs"
   },

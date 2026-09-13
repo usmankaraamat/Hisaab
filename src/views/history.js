@@ -36,6 +36,7 @@ import {
 } from '../lib/budget.js';
 import { invalidate } from '../capture/predict.js';
 import { syncNow } from '../db/sync.js';
+import { isFundingTransfer, transferLabel } from '../lib/transfers.js';
 
 const DAY = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
@@ -236,7 +237,10 @@ function fillOptions(select, values, current, allLabel) {
 }
 
 async function paint(body, controls) {
-  const rows = await listTransactions({ limit: 2000 });
+  const [rows, funding] = await Promise.all([
+    listTransactions({ limit: 2000 }),
+    getMeta('budget.funding', null),
+  ]);
 
   if (controls) {
     const groups = [ON_OTHERS, OWED].filter((g) => rows.some((r) => inGroup(r, g)));
@@ -276,7 +280,7 @@ async function paint(body, controls) {
 
   if (filtering) {
     const total = shown
-      .filter((r) => r.direction === 'out')
+      .filter((r) => r.direction === 'out' && !isFundingTransfer(r))
       .reduce((a, b) => a + b.amount_minor, 0);
     const summary = document.createElement('div');
     summary.className = 'h-summary';
@@ -295,7 +299,7 @@ async function paint(body, controls) {
 
   for (const [day, items] of groups) {
     const spent = items
-      .filter((i) => i.direction === 'out')
+      .filter((i) => i.direction === 'out' && !isFundingTransfer(i))
       .reduce((a, b) => a + b.amount_minor, 0);
 
     const section = document.createElement('div');
@@ -308,18 +312,28 @@ async function paint(body, controls) {
       <ul></ul>`;
 
     const ul = section.querySelector('ul');
-    for (const r of items) ul.append(row(r, body, controls));
+    for (const r of items) ul.append(row(r, body, controls, funding));
     body.append(section);
   }
 }
 
-function row(r, body, controls) {
+function row(r, body, controls, funding) {
   const li = document.createElement('li');
   li.className = 'h-row';
+  const snapshotAt = funding?.at ? new Date(funding.at).getTime() : null;
+  // The two balances were counted at the snapshot instant, so a row stamped
+  // exactly then is already included in that count. fundingSummary uses the
+  // same exclusive boundary.
+  const afterSnapshot = snapshotAt !== null && new Date(r.occurred_at).getTime() > snapshotAt;
+  const cashMovement = r.source !== 'bluecoins' && !isFundingTransfer(r) && !(r.direction === 'out' && r.ledger_effect === 'borrowed');
+  const isFuture = new Date(r.occurred_at).getTime() > Date.now();
+  const affectsBalances = afterSnapshot && cashMovement && !isFuture;
+  const source = r.funding_source === 'other' ? 'other' : 'essential';
 
   // Whatever is known about the row beyond the raw text — set by the enrichment
   // pass, or at capture for a shared expense.
   const tags = [
+    isFundingTransfer(r) ? transferLabel(source) : null,
     r.category,
     r.counterparty_name
       ? `${r.counterparty_name}${r.ledger_effect ? ` · ${r.ledger_effect.replace('_', ' ')}` : ''}`
@@ -331,16 +345,77 @@ function row(r, body, controls) {
       <span class="r-name">${escapeHtml(txnLabel(r))}</span>
       ${hasRewrite(r) ? `<span class="r-raw">${escapeHtml(r.raw_name)}</span>` : ''}
       ${tags.length ? `<span class="r-tags">${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</span>` : ''}
-      <span class="r-amt ${r.direction}">${formatTxnAmount(r)}</span>
-    </button>`;
+      <span class="r-amt ${isFundingTransfer(r) ? 'transfer' : r.direction}">${
+        isFundingTransfer(r) ? formatMinor(r.amount_minor) : formatTxnAmount(r)
+      }</span>
+    </button>
+    ${
+      snapshotAt === null
+        ? ''
+        : isFundingTransfer(r)
+          ? ''
+          : affectsBalances
+          ? `<button type="button" class="tag h-funding-toggle" data-source="${source}" aria-pressed="${source === 'other'}" aria-label="${source === 'essential' ? 'Mark non-essential' : 'Mark essential'}: ${escapeHtml(txnLabel(r))}">
+               ${source === 'essential' ? 'Mark non-essential' : 'Mark essential'}
+             </button>`
+          : `<span class="tag h-funding-past" title="${afterSnapshot ? 'This is reference data or did not move your cash, so it does not change either current balance.' : 'This entry predates the essential-balance snapshot and does not change either current balance.'}">${afterSnapshot ? 'No cash movement' : 'Before balance setup'}</span>`
+    }`;
 
   li.querySelector('.r-open').addEventListener('click', () => {
     if (li.querySelector('form')) return;
-    li.append(editor(r, body, controls));
-    li.querySelector('input[name="name"]').focus();
+    li.append(isFundingTransfer(r) ? transferEditor(r, body, controls) : editor(r, body, controls));
+    li.querySelector('input[name="name"]')?.focus();
+  });
+
+  const toggle = li.querySelector('.h-funding-toggle');
+  toggle?.addEventListener('click', async () => {
+    if (toggle.disabled) return;
+    toggle.disabled = true;
+    const next = source === 'essential' ? 'other' : 'essential';
+    try {
+      await updateTransaction(r.id, { funding_source: next });
+      invalidate();
+      syncNow().catch(() => {});
+      await paint(body, controls);
+    } catch (err) {
+      toggle.disabled = false;
+      toggle.textContent = 'Could not change source';
+      toggle.title = err.message;
+    }
   });
 
   return li;
+}
+
+function transferEditor(r, body, controls) {
+  const form = document.createElement('form');
+  form.className = 'h-edit';
+  form.innerHTML = `
+    <p class="hint">${escapeHtml(transferLabel(r.funding_source))}. This is one balance move, so editing it as a purchase would make the balances wrong.</p>
+    <p class="h-edit-msg" hidden></p>
+    <div class="h-edit-actions">
+      <button type="button" data-act="delete" class="danger">Delete move</button>
+      <button type="button" data-act="cancel">Cancel</button>
+    </div>`;
+  const msg = form.querySelector('.h-edit-msg');
+  form.addEventListener('click', async (e) => {
+    const act = e.target.closest('button[data-act]')?.dataset.act;
+    if (act === 'cancel') return form.remove();
+    if (act !== 'delete') return;
+    const button = e.target.closest('button');
+    button.disabled = true;
+    try {
+      await deleteTransaction(r.id);
+      invalidate();
+      syncNow().catch(() => {});
+      await paint(body, controls);
+    } catch (err) {
+      button.disabled = false;
+      msg.hidden = false;
+      msg.textContent = `Could not delete this move: ${err.message}`;
+    }
+  });
+  return form;
 }
 
 /**

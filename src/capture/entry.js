@@ -72,6 +72,20 @@ export async function renderAdd(root) {
           <button type="submit" id="save" class="save" disabled aria-label="Save entry">${icon('arrowUp', { size: 22 })}</button>
         </div>
 
+        <div class="repeat-prompt" id="repeat-prompt" hidden>
+          <div class="repeat-item">
+            <span class="repeat-kicker">Logging again</span>
+            <strong id="repeat-name"></strong>
+          </div>
+          <label class="repeat-amount-label" for="repeat-amount">Amount spent</label>
+          <input id="repeat-amount" class="repeat-amount" type="number" inputmode="decimal"
+            min="0.01" step="0.01" placeholder="0.00" autocomplete="off" />
+          <div class="repeat-actions">
+            <button type="button" class="link" id="repeat-cancel">Cancel</button>
+            <button type="button" class="link" id="repeat-change">Change item</button>
+          </div>
+        </div>
+
         <div class="preview" id="preview" aria-live="polite">
           <span class="preview-name">&nbsp;</span>
         </div>
@@ -118,6 +132,11 @@ export async function renderAdd(root) {
 
   const form = root.querySelector('#entry-form');
   const input = root.querySelector('#entry-input');
+  const repeatPrompt = root.querySelector('#repeat-prompt');
+  const repeatName = root.querySelector('#repeat-name');
+  const repeatAmount = root.querySelector('#repeat-amount');
+  const repeatCancel = root.querySelector('#repeat-cancel');
+  const repeatChange = root.querySelector('#repeat-change');
   const preview = root.querySelector('#preview');
   const saveBtn = root.querySelector('#save');
   const suggestions = root.querySelector('#suggestions');
@@ -152,6 +171,34 @@ export async function renderAdd(root) {
   // What each payee has sold you before, so a resolve form opens on the thing
   // rather than on their name. See lib/payees.js.
   let payees = {};
+  let repeatSelection = null;
+  let saving = false;
+
+  function clearRepeatSelection({ focus = true } = {}) {
+    repeatSelection = null;
+    plan = null;
+    splitOverride = null;
+    repeatPrompt.hidden = true;
+    input.hidden = false;
+    repeatAmount.value = '';
+    saveBtn.disabled = true;
+    refreshPreview();
+    if (focus) input.focus();
+  }
+
+  function selectRepeat(pick) {
+    repeatSelection = { text: pick.text, direction };
+    input.value = '';
+    input.hidden = true;
+    repeatName.textContent = pick.label;
+    repeatAmount.value = '';
+    repeatPrompt.hidden = false;
+    preview.innerHTML = `<span class="preview-name">${escapeHtml(pick.label)}</span><span class="preview-missing">amount?</span>`;
+    saveBtn.disabled = true;
+    refreshPreview();
+    // Focus after the browser paints the prompt so mobile opens its decimal keypad.
+    requestAnimationFrame(() => repeatAmount.focus());
+  }
 
   /* If a rule matches, set its category outright and mark the row done so the
    * enrichment pass leaves it alone. Splits are exempt: they already carry a
@@ -166,19 +213,28 @@ export async function renderAdd(root) {
   }
 
   function currentParse() {
-    const parsed = parseEntry(input.value);
-    // "reimbursement from tom" is money arriving, whatever the toggle says. It
-    // gets the same override an explicit "+" does, so the preview cannot show a
-    // minus on a row that will be saved as income.
+    const parsed = repeatSelection
+      ? (() => {
+          const amountMinor = toMinor(repeatAmount.value);
+          return {
+            name: repeatSelection.text,
+            amountMinor: Number.isFinite(amountMinor) ? amountMinor : null,
+            direction: repeatSelection.direction,
+            explicitDirection: false,
+          };
+        })()
+      : parseEntry(input.value);
+    if (repeatSelection && !parsed.name) {
+      return parsed;
+    }
+    /* A repeated item still goes through the same semantic checks as typed
+     * capture: a remembered reimbursement or cash loan must remain incoming. */
     if (parseReimbursement(parsed.name)) {
       return { ...parsed, direction: 'in', explicitDirection: true };
     }
-    // "Loan from Khuzaima" is cash arriving. "Chicken piece from Harry" is not —
-    // Harry paid, so it is still an expense, just one someone else funded.
     if (parseFromClause(parsed.name)?.cashLoan) {
       return { ...parsed, direction: 'in', explicitDirection: true };
     }
-    // An explicit +/- in the text wins over the toggle.
     return { ...parsed, direction: parsed.explicitDirection ? parsed.direction : direction };
   }
 
@@ -245,8 +301,11 @@ export async function renderAdd(root) {
     const valid = Boolean(name) && amountMinor !== null && amountMinor > 0;
     saveBtn.disabled = !valid;
 
-    if (!input.value.trim()) {
+    if (!input.value.trim() && !repeatSelection) {
       preview.innerHTML = '<span class="preview-name">&nbsp;</span>';
+      dupeBox.hidden = true;
+      warning.hidden = true;
+      splitBox.hidden = true;
       return;
     }
 
@@ -302,6 +361,7 @@ export async function renderAdd(root) {
 
   function setDirection(next, { silent = false } = {}) {
     direction = next;
+    if (repeatSelection) repeatSelection.direction = next;
     for (const b of dirButtons) {
       const active = b.dataset.dir === next;
       b.classList.toggle('active', active);
@@ -336,9 +396,9 @@ export async function renderAdd(root) {
    * carry no caption — a name and its price are self-evident, and a line of
    * explanation above three short rows was more furniture than the rows.
    *
-   * Tapping one fills the input with the name and its median amount and leaves
-   * the cursor there, so the predicted price is confirmed rather than silently
-   * committed — Save is one tap away and already enabled.
+   * Tapping one selects the item and asks for its current amount in a separate
+   * focused numeric field. The predicted price stays context only; it is never
+   * mixed into the item name or silently committed.
    */
   async function refreshSuggestions() {
     const picks = await suggestChips({ limit: 3 });
@@ -351,17 +411,7 @@ export async function renderAdd(root) {
       b.className = 'suggestion';
       b.innerHTML = `<span class="s-name">${escapeHtml(pick.label)}</span>
         <span class="s-amt">${formatMinor(pick.amountMinor)}</span>`;
-      b.addEventListener('click', () => {
-        const rupees =
-          pick.amountMinor % 100 === 0
-            ? pick.amountMinor / 100
-            : (pick.amountMinor / 100).toFixed(2);
-        input.value = `${pick.text} ${rupees}`;
-        setDirection('out', { silent: true });
-        refreshPreview();
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-      });
+      b.addEventListener('click', () => selectRepeat(pick));
       suggestions.append(b);
     }
   }
@@ -749,14 +799,36 @@ export async function renderAdd(root) {
    * change a decision — the moment before an entry is typed.
    */
   async function refreshAllowance() {
-    const [opening, target] = await Promise.all([
+    const [opening, target, funding] = await Promise.all([
       getMeta('budget.opening', null),
       getMeta('budget.savingsTarget', 0),
+      getMeta('budget.funding', null),
     ]);
-    const b = budgetSummary(history, { opening, savingsTargetMinor: Number(target) || 0 });
+    const b = budgetSummary(history, {
+      opening,
+      savingsTargetMinor: Number(target) || 0,
+      funding,
+    });
+
+    if (funding && Number.isFinite(b.essentialMinor) && Number.isFinite(b.otherMinor)) {
+      allowance.hidden = false;
+      allowance.className = 'allowance funding-allowance';
+      const formatFunding = (value) => formatMinor(value, { sign: value < 0 ? '−' : '' });
+      allowance.innerHTML = `
+        <span class="allowance-kicker">Money available</span>
+        <span class="allowance-main funding-essential">${formatFunding(b.essentialMinor)}</span>
+        ${b.dailyMinor === null ? '' : `<span class="allowance-detail funding-safe">${formatFunding(b.dailyMinor)} safe per day · ${formatFunding(b.safeToSpendMinor)} safe for this period</span>`}
+        <span class="allowance-detail funding-detail">
+          <span>Essential</span><span>Other ${formatFunding(b.otherMinor)}</span><span>Total ${formatFunding(b.cashMinor)}</span>
+        </span><a class="allowance-action" href="#settings?focus=transfer">Move money</a>`;
+      return;
+    }
 
     if (b.anchoredTo === 'none' || b.dailyMinor === null) {
-      allowance.hidden = true;
+      allowance.hidden = false;
+      allowance.className = 'allowance allowance-unconfigured';
+      allowance.innerHTML = `<span class="allowance-kicker">Track your money</span>
+        <span class="allowance-detail">Set an opening balance or <a href="#settings">configure Essential and Other balances</a>.</span>`;
       return;
     }
 
@@ -797,42 +869,59 @@ export async function renderAdd(root) {
   }
 
   input.addEventListener('input', refreshPreview);
+  repeatAmount.addEventListener('input', () => {
+    refreshPreview();
+  });
+  repeatCancel.addEventListener('click', () => clearRepeatSelection());
+  repeatChange.addEventListener('click', () => {
+    const selectedName = repeatSelection?.text || '';
+    clearRepeatSelection({ focus: false });
+    input.value = selectedName;
+    refreshPreview();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
   for (const b of dirButtons) {
     b.addEventListener('click', () => setDirection(b.dataset.dir));
   }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (saving) return;
     const { name, amountMinor, direction: dir } = currentParse();
     if (!name || amountMinor === null || amountMinor <= 0) return;
+    saving = true;
+    try {
+      // Capture the decision before clearing the field, which recomputes the plan.
+      const commit = splitting() ? plan : null;
+      const written = commit
+        ? await addTransactions(commit.rows, { source_text: name })
+        : [await addTransaction(applyRule({ raw_name: name, amount_minor: amountMinor, direction: dir }))];
 
-    // Capture the decision before clearing the field, which recomputes the plan.
-    const commit = splitting() ? plan : null;
-
-    const written = commit
-      ? await addTransactions(commit.rows, { source_text: name })
-      : [await addTransaction(applyRule({ raw_name: name, amount_minor: amountMinor, direction: dir }))];
-
-    input.value = '';
-    setDirection('out', { silent: true });
-    refreshPreview();
-    input.focus();
-
-    invalidate();
-    const summary =
-      written.length > 1
-        ? `Saved ${formatMinor(amountMinor)} across ${written.length} entries`
-        : `Saved ${formatMinor(amountMinor)} · ${name}`;
-    showToast(summary, {
-      label: 'Undo',
-      run: async () => {
-        for (const rec of written) await deleteTransaction(rec.id);
-        invalidate();
-        await refreshAll();
-      },
-    });
-
-    await refreshAll();
+      input.value = '';
+      if (repeatSelection) clearRepeatSelection({ focus: false });
+      setDirection('out', { silent: true });
+      refreshPreview();
+      input.focus();
+      invalidate();
+      const summary =
+        written.length > 1
+          ? `Saved ${formatMinor(amountMinor)} across ${written.length} entries`
+          : `Saved ${formatMinor(amountMinor)} · ${name}`;
+      showToast(summary, {
+        label: 'Undo',
+        run: async () => {
+          for (const rec of written) await deleteTransaction(rec.id);
+          invalidate();
+          await refreshAll();
+        },
+      });
+      await refreshAll();
+    } catch (err) {
+      showToast(`Couldn't save: ${err?.message || 'try again'}`);
+    } finally {
+      saving = false;
+    }
   });
 
   await refreshAll();

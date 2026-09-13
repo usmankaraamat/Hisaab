@@ -922,6 +922,7 @@ const rows = inputs.map((i) => ({
   raw_name: i.raw_name,
   amount_minor: i.amount_minor,
   direction: i.direction,
+  category: i.category,
   occurred_at: i.occurred_at,
 }));
 
@@ -951,6 +952,13 @@ check('the two times of day differ',
 check('every suggestion carries a median amount',
   [...morning, ...evening].every((s) => Number.isInteger(s.amountMinor) && s.amountMinor > 0), true);
 check('three rows, not five', [morning.length, evening.length], [3, 3]);
+const withCorrection = [
+  ...rows,
+  { raw_name: 'cash correction', amount_minor: 999999, direction: 'out', category: 'Reconcile', occurred_at: summary.max },
+  { raw_name: 'move money', amount_minor: 999999, direction: 'out', source: 'funding_transfer', occurred_at: summary.max },
+];
+check('cash corrections never become repeat suggestions',
+  labels(rankSuggestions(withCorrection, { now: at(9), limit: 3 })), labels(morning));
 
 console.log('\n--- insights (from the real export) ---');
 const asOf = new Date(summary.max);

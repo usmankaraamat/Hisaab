@@ -19,6 +19,7 @@
  */
 
 import { isWrittenOffShare, isOutstandingLoan, NON_SPEND, RECONCILE } from './budget.js';
+import { isFundingTransfer } from './transfers.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -98,6 +99,7 @@ function empty(key, label, extra = {}) {
 }
 
 function into(t, row) {
+  if (isFundingTransfer(row)) return;
   t.count++;
 
   if (row.direction === 'in') {

@@ -170,6 +170,80 @@ h3 { font-size: .95rem; margin: 0 0 6px; }
   border-color: var(--accent);
 }
 
+.repeat-prompt {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0 4px;
+}
+
+.repeat-item {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.repeat-kicker, .repeat-amount-label {
+  color: var(--muted);
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.repeat-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.15rem;
+}
+
+.repeat-amount {
+  width: 100%;
+  padding: 14px;
+  font: inherit;
+  font-size: 1.35rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+
+.repeat-amount:focus { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+
+.repeat-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.funding-allowance .allowance-main {
+  display: block;
+  font-size: 1.45rem;
+}
+
+.funding-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.funding-detail span:first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.allowance-unconfigured .allowance-detail a { color: var(--accent); }
+
+.allowance-action {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: .8rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.allowance-action:hover { text-decoration: underline; }
+
 .preview {
   display: flex;
   align-items: baseline;

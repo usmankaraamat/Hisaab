@@ -29,6 +29,9 @@
 import { subscriptions } from './insights.js';
 import { balances, ledgerTotals } from './ledger.js';
 import { personKey } from '../capture/split.js';
+import { groupKey } from '../capture/normalize.js';
+import { fundingSource, fundingSummary } from './funding.js';
+import { isFundingTransfer } from './transfers.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -198,9 +201,10 @@ export function calendarPeriod(now = new Date()) {
  */
 export function budgetSummary(
   rows,
-  { opening = null, savingsTargetMinor = 0, now = new Date() } = {}
+  { opening = null, savingsTargetMinor = 0, funding = null, now = new Date() } = {}
 ) {
   const all = live(rows);
+  const fundingBalance = fundingSummary(rows, funding, now);
   const period = calendarPeriod(now);
   const periodStartMs = new Date(period.periodStart).getTime();
   const periodEndMs = new Date(period.periodEnd).getTime();
@@ -228,6 +232,17 @@ export function budgetSummary(
     anchoredTo = 'none';
   }
 
+  // A funding snapshot anchors the two current balances, but it must never
+  // become the reporting boundary.  Spending and savings are month figures;
+  // moving the boundary to a count taken today would make everything earlier
+  // this month vanish from those figures.  A funding setup also supersedes an
+  // old one-pot opening balance for this calculation.
+  if (fundingBalance) {
+    sinceMs = periodStartMs;
+    baseMinor = 0;
+    anchoredTo = 'funding';
+  }
+
   const inPeriod = all.filter((r) => new Date(r.occurred_at).getTime() >= sinceMs);
 
   let inMinor = 0;
@@ -241,6 +256,9 @@ export function budgetSummary(
   let fundedByOthersMinor = 0;
 
   for (const r of inPeriod) {
+    // A pot-to-pot move is recorded as one row for atomic history and sync, but
+    // it is not money entering, leaving, or being transferred out of the budget.
+    if (isFundingTransfer(r)) continue;
     if (r.direction === 'in') {
       inMinor += r.amount_minor;
 
@@ -293,13 +311,26 @@ export function budgetSummary(
   // Recurring charges already due inside this period. `subscriptions` reads the
   // whole history on purpose — a cycle cannot be detected from one period.
   const horizon = nextIncomeMs ?? now.getTime() + 30 * DAY_MS;
-  const committed = subscriptions(all, { now })
+  const committed = subscriptions(all.filter((r) => !isFundingTransfer(r) && new Date(r.occurred_at).getTime() <= now.getTime()), { now })
     .filter((s) => !s.lapsed)
     .filter((s) => {
       const due = new Date(s.nextDue).getTime();
       return due > now.getTime() && due <= horizon;
     });
   const committedMinor = committed.reduce((a, s) => a + s.lastMinor, 0);
+
+  // A recurring payment is reserved from the pot that paid its latest cycle.
+  // This keeps a card-funded Netflix bill from quietly shrinking the essential
+  // account allowance simply because subscriptions are detected globally.
+  const committedEssentialMinor = fundingBalance
+    ? committed.reduce((total, subscription) => {
+        const latest = all
+          .filter((r) => r.direction === 'out' && groupKey(r.raw_name) === subscription.key)
+          .filter((r) => r.occurred_at === subscription.lastSeen)
+          .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
+        return total + (fundingSource(latest) === 'essential' ? subscription.lastMinor : 0);
+      }, 0)
+    : committedMinor;
 
   /* Debts, netted per person and read from the whole history.
    *
@@ -322,8 +353,10 @@ export function budgetSummary(
   // Money owed to other people is as spoken for as a bill that has not arrived
   // yet. Money owed *to* you is not added back — it may never come, and a
   // spending limit should never be inflated by an optimistic assumption.
+  const allowanceCashMinor = fundingBalance ? fundingBalance.essentialMinor : cashMinor;
+  const allowanceCommittedMinor = fundingBalance ? committedEssentialMinor : committedMinor;
   const safeToSpendMinor =
-    cashMinor - committedMinor - savingsRemainingMinor - owed.iOweMinor;
+    allowanceCashMinor - allowanceCommittedMinor - savingsRemainingMinor - owed.iOweMinor;
 
   return {
     since: new Date(sinceMs).toISOString(),
@@ -339,7 +372,16 @@ export function budgetSummary(
     baseMinor,
     inMinor,
     outMinor,
-    cashMinor,
+    // Once pots are configured this is their current total, so screens that
+    // already show cash continue to show the honest all-money balance.
+    cashMinor: fundingBalance ? fundingBalance.totalMinor : cashMinor,
+    ...(fundingBalance
+      ? {
+          essentialMinor: fundingBalance.essentialMinor,
+          otherMinor: fundingBalance.otherMinor,
+          funding: fundingBalance,
+        }
+      : {}),
 
     incomeMinor,
     // What the period actually cost: your own consumption plus whatever you
@@ -361,7 +403,8 @@ export function budgetSummary(
     people: book,
 
     committed,
-    committedMinor,
+    committedMinor: allowanceCommittedMinor,
+    totalCommittedMinor: committedMinor,
     savingsTargetMinor,
     savingsRemainingMinor,
     safeToSpendMinor,
@@ -397,6 +440,7 @@ export function budgetSummary(
  */
 export function isSpendRow(row, { includeNonSpend = false } = {}) {
   if (!row || row.deleted || REFERENCE.has(row.source)) return false;
+  if (isFundingTransfer(row)) return false;
   if (row.direction !== 'out') return false;
   // A reconciliation charge is a correction, never a purchase — it stays out of
   // the breakdown whatever else is included, so the bars keep meaning "what you
