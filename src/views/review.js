@@ -87,15 +87,29 @@ async function paint(body) {
   const msg = body.querySelector('#run-msg');
 
   body.querySelector('#run').addEventListener('click', async () => {
+    if (!localStorage.getItem('hisaab.aiDisclosure.v1')) {
+      const ok = window.confirm(
+        'Hisaab sends the uncategorised transaction descriptions in this batch to Google Gemini so it can suggest categories and tidy names. Amounts and dates are included for context.'
+      );
+      if (!ok) return;
+      localStorage.setItem('hisaab.aiDisclosure.v1', 'accepted');
+    }
     msg.className = 'hint';
     msg.textContent = 'Categorising…';
     try {
-      const { data, error: fnError } = await sb.functions.invoke('enrich', { body: { limit: 300 } });
-      if (fnError) throw fnError;
+      const personalKey = localStorage.getItem('hisaab.personalGeminiKey') || '';
+      const { data, error: fnError } = await sb.functions.invoke('enrich', {
+        body: { limit: 300, ...(personalKey ? { personalKey } : {}) },
+      });
+      if (fnError) {
+        let detail = null;
+        try { detail = await fnError.context?.json(); } catch (_) { /* use SDK message */ }
+        throw new Error(detail?.message || fnError.message);
+      }
       if (data?.error) throw new Error(data.error);
       msg.className = 'ok';
       msg.textContent = data?.enriched
-        ? `${data.enriched} proposal(s) ready.`
+        ? `${data.enriched} proposal(s) ready. ${data.personal ? 'Used your personal Gemini key.' : data.quota ? `${data.quota.limit - data.quota.used} hosted batch(es) left today.` : ''}`
         : (data?.message ?? 'Nothing to do.');
       await paint(body);
     } catch (err) {

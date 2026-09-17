@@ -4,9 +4,10 @@
  * never shipped to the browser, and the client never talks to
  * generativelanguage.googleapis.com directly.
  *
- * The function is called with the signed-in user's JWT and builds its Supabase
- * client from that token, so every query is scoped by RLS to the caller's own
- * rows. No service-role key is needed anywhere in this path.
+ * The function is called with the signed-in user's JWT and builds its data
+ * client from that token, so every ledger query is scoped by RLS to the
+ * caller's own rows. The runtime-provided service role is used only by the
+ * shared quota helper; it is never sent to the browser.
  *
  * Nothing is written onto a transaction here. Results land in
  * `enrichment_proposals` with status 'pending'; the review screen is what
@@ -21,6 +22,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { SCHEMA, SYSTEM, buildPrompt } from './prompt.js';
 import { callGemini, GeminiError } from './gemini.js';
+import { authenticate, quotaMessage, releaseQuota, reserveQuota } from '../_shared/quota.ts';
 
 const MODEL = 'gemini-3.5-flash-lite';
 const MAX_BATCH = 400;
@@ -87,8 +89,10 @@ Deno.serve(async (request: Request) => {
   const authorization = request.headers.get('Authorization');
   if (!authorization) return json(request, { error: 'Missing Authorization header.' }, 401);
 
-  const geminiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!geminiKey) return json(request, { error: 'GEMINI_API_KEY is not set on the function.' }, 500);
+  const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+
+  const user = await authenticate(request);
+  if (!user) return json(request, { error: 'Not signed in.' }, 401);
 
   // Built from the caller's JWT, so RLS scopes every query below to them.
   const db = createClient(
@@ -96,10 +100,6 @@ Deno.serve(async (request: Request) => {
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authorization } } }
   );
-
-  const { data: auth } = await db.auth.getUser();
-  const user = auth?.user;
-  if (!user) return json(request, { error: 'Not signed in.' }, 401);
 
   const body = await request.json().catch(() => ({}));
   const limit = Math.min(Number(body.limit) || MAX_BATCH, MAX_BATCH);
@@ -130,6 +130,26 @@ Deno.serve(async (request: Request) => {
   const batch = pending.filter((t) => !alreadyProposed.has(t.id));
   if (!batch.length) return json(request, { enriched: 0, message: 'All pending rows already have proposals.' });
 
+  const personalKey = typeof body.personalKey === 'string' && body.personalKey.length <= 300
+    ? body.personalKey.trim()
+    : '';
+
+  // One reservation covers the whole batch, regardless of how many internal
+  // model chunks it takes. A personal key is used only after the hosted allowance.
+  const quota = await reserveQuota(user.id, 'hisaab_enrichment');
+  const usingPersonal = !quota.allowed && Boolean(personalKey);
+  if (!quota.allowed && !usingPersonal) {
+    return json(request, {
+      error: 'quota_exhausted',
+      message: quotaMessage(quota),
+      quota,
+    }, 429);
+  }
+  if (!usingPersonal && !geminiKey) {
+    await releaseQuota(user.id, 'hisaab_enrichment');
+    return json(request, { error: 'Hosted categorisation is not configured yet.' }, 503);
+  }
+
   const known: Known = {
     items: (items ?? []).map((i) => i.canonical_name),
     routes: (routes ?? []).map((r) => `${r.provider}: ${r.from_place} -> ${r.to_place}`),
@@ -158,10 +178,13 @@ Deno.serve(async (request: Request) => {
   for (let i = 0; i < payload.length; i += CHUNK) {
     let out;
     try {
-      out = await enrichChunk(geminiKey, known, payload.slice(i, i + CHUNK));
+      out = await enrichChunk(usingPersonal ? personalKey : geminiKey, known, payload.slice(i, i + CHUNK));
     } catch (err) {
       // Keep whatever earlier chunks produced rather than losing the whole pass.
-      if (!results.length) return json(request, { error: `Gemini call failed: ${(err as Error).message}` }, 502);
+      if (!results.length) {
+        if (!usingPersonal) await releaseQuota(user.id, 'hisaab_enrichment');
+        return json(request, { error: `Gemini call failed: ${(err as Error).message}` }, 502);
+      }
       break;
     }
 
@@ -205,10 +228,16 @@ Deno.serve(async (request: Request) => {
     status: 'pending',
   }));
 
-  if (!proposals.length) return json(request, { error: 'Model returned no usable results.' }, 502);
+  if (!proposals.length) {
+    if (!usingPersonal) await releaseQuota(user.id, 'hisaab_enrichment');
+    return json(request, { error: 'Model returned no usable results.' }, 502);
+  }
 
   const { error: writeError } = await db.from('enrichment_proposals').insert(proposals);
-  if (writeError) return json(request, { error: writeError.message }, 500);
+  if (writeError) {
+    if (!usingPersonal) await releaseQuota(user.id, 'hisaab_enrichment');
+    return json(request, { error: writeError.message }, 500);
+  }
 
   return json(request, {
     enriched: proposals.length,
@@ -216,5 +245,8 @@ Deno.serve(async (request: Request) => {
     missing: batch.length - proposals.length,
     model: MODEL,
     tokens: { input: inTokens, output: outTokens },
+    ...(usingPersonal
+      ? { personal: true }
+      : { quota: { used: quota.used, limit: quota.daily_limit, resetAt: quota.reset_at } }),
   });
 });

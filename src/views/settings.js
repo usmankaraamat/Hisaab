@@ -34,6 +34,21 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
+        <h3>AI provider <small>(advanced)</small></h3>
+        <p class="hint">
+          Hisaab includes five hosted categorisation batches each day. If you use
+          them all, you can continue with your own Gemini key. It stays in this
+          browser, is sent only to Hisaab's Edge Function for the request, and is
+          never synced or exported.
+        </p>
+        <label class="stack">Personal Gemini key
+          <input type="password" id="personal-gemini" placeholder="optional" autocomplete="off" />
+        </label>
+        <p id="personal-gemini-msg" class="hint"></p>
+        <button type="button" id="save-personal-gemini">Save on this device</button>
+      </div>
+
+      <div class="card">
         <h3>Accent colour</h3>
         <p class="hint">
           The colour of Save, the active tab, links and every “under pace” figure. Each one
@@ -266,6 +281,17 @@ export async function renderSettings(root, params) {
   const stats = root.querySelector('#stats');
   const result = root.querySelector('#import-result');
   const account = root.querySelector('#account');
+
+  const personalGemini = root.querySelector('#personal-gemini');
+  const personalGeminiMsg = root.querySelector('#personal-gemini-msg');
+  personalGemini.value = localStorage.getItem('hisaab.personalGeminiKey') || '';
+  root.querySelector('#save-personal-gemini').addEventListener('click', () => {
+    const value = personalGemini.value.trim();
+    if (value) localStorage.setItem('hisaab.personalGeminiKey', value);
+    else localStorage.removeItem('hisaab.personalGeminiKey');
+    personalGeminiMsg.className = 'ok';
+    personalGeminiMsg.textContent = value ? 'Saved on this device.' : 'Personal key cleared.';
+  });
 
   /* Budget.
    *
@@ -971,7 +997,7 @@ function organiseSettings(root) {
 
   const groups = [
     ['Account & sync', 'Your current sync state stays visible.', ['Sync'], true],
-    ['Capture intelligence', 'Optional notification forwarding and capture helpers.', ['Auto-capture (advanced)'], false],
+    ['Capture intelligence', 'Hosted categorisation, optional fallback, and notification forwarding.', ['AI provider (advanced)', 'Auto-capture (advanced)'], false],
     ['Appearance', 'How the app looks on this device.', ['Accent colour'], false],
     ['Budget', 'Balances, savings goals, and category limits.', ['Essential balance', 'Budget', 'Savings goal', 'Category budgets'], false],
     ['Recurring', 'Charges and income that should surface when due.', ['Recurring & reminders'], false],

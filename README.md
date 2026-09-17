@@ -44,6 +44,10 @@ silent, and the evidence a re-run needs is still there.
 **Nothing auto-commits.** The enrichment pass writes to `enrichment_proposals`
 with status `pending`. The Review tab promotes them. A bad pass costs one tap.
 
+Each signed-in account receives five hosted enrichment batches per Karachi day.
+One batch may contain many transactions; empty and failed runs do not consume the
+allowance. A separate global ceiling protects the shared provider budget.
+
 ## Capture
 
 One line: `chicken 900`. The amount is taken only from a standalone first or last
