@@ -89,6 +89,13 @@ const SETTINGS_HELP = {
       '<b>Data on this device:</b> shows how many entries and events are stored locally.',
     ],
   },
+  'Review & privacy': {
+    intro: 'Send feedback directly and control the small usage counts that help plan the apps.',
+    items: [
+      '<b>Feedback:</b> signed-in feedback includes your account email so Usman can reply. Without an account, adding an email is optional.',
+      '<b>Anonymous counts:</b> records a random installation ID and one activity row per day. It never sends transactions, amounts, descriptions, or API keys.',
+    ],
+  },
   Reset: {
     intro: 'This is for starting over on the current device.',
     items: [

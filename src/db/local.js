@@ -213,6 +213,7 @@ export async function addTransaction(input) {
     created_at: rec.created_at,
   });
   await done;
+  globalThis.window?.dispatchEvent(new CustomEvent('hisaab:meaningful-use'));
   return rec;
 }
 
@@ -251,6 +252,7 @@ export async function addTransactions(inputs, { source_text = null } = {}) {
     });
   }
   await done;
+  globalThis.window?.dispatchEvent(new CustomEvent('hisaab:meaningful-use'));
   return records;
 }
 

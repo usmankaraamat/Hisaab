@@ -1022,7 +1022,9 @@ label.stack {
   font-size: .82rem;
 }
 
-label.stack input {
+label.stack input,
+label.stack select,
+label.stack textarea {
   display: block;
   width: 100%;
   margin-top: 5px;
@@ -1033,6 +1035,12 @@ label.stack input {
   border: 1px solid var(--line);
   border-radius: 10px;
 }
+label.stack textarea { resize: vertical; min-height: 96px; }
+.check-row {
+  display: flex; align-items: center; gap: 9px; margin: 12px 0 8px;
+  color: var(--muted); font-size: .84rem;
+}
+.check-row input { width: 18px; height: 18px; accent-color: var(--accent); }
 
 /* Whose money it was. Red on everything they paid — for you, or back to you —
  * so a screenshot of a person's panel reads without the meta line. The minus

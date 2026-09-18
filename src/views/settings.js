@@ -23,6 +23,12 @@ import { ensureIngestToken } from '../db/ingest.js';
 import { escapeHtml } from '../capture/entry.js';
 import { ACCENTS, currentAccent, setAccent } from '../ui/theme.js';
 import { createSettingsHelp, openOnboarding } from '../ui/onboarding.js';
+import {
+  productAnalyticsEnabled,
+  productHeartbeat,
+  setProductAnalyticsEnabled,
+  submitProductFeedback,
+} from '../product-data.js';
 
 export async function renderSettings(root, params) {
   root.innerHTML = `
@@ -239,6 +245,31 @@ export async function renderSettings(root, params) {
         <dl id="stats"></dl>
       </div>
 
+      <div class="card">
+        <h3>Review Hisaab</h3>
+        <p class="hint">Found something awkward or have an idea? Send it straight to Usman.</p>
+        <label class="stack">Rating <small>(optional)</small>
+          <select id="feedback-rating">
+            <option value="">No rating</option>
+            <option value="5">5 — love it</option>
+            <option value="4">4 — pretty good</option>
+            <option value="3">3 — it is okay</option>
+            <option value="2">2 — needs work</option>
+            <option value="1">1 — rough right now</option>
+          </select>
+        </label>
+        <label class="stack">What should change?
+          <textarea id="feedback-message" rows="4" maxlength="4000" placeholder="A bug, an idea, or anything that feels annoying…"></textarea>
+        </label>
+        <label class="stack" id="feedback-email-wrap">Email for a reply <small>(optional)</small>
+          <input type="email" id="feedback-email" autocomplete="email" placeholder="you@example.com" />
+        </label>
+        <label class="check-row"><input type="checkbox" id="anonymous-analytics" /> Share anonymous usage counts</label>
+        <p class="hint" id="feedback-identity">No transactions, amounts, API keys, or personal entries are collected.</p>
+        <p class="hint" id="feedback-msg"></p>
+        <button type="button" id="send-feedback">Send feedback</button>
+      </div>
+
       <div class="card danger">
         <h3>Erase local data</h3>
         <p class="hint">Deletes every transaction and event on this device.</p>
@@ -287,6 +318,53 @@ export async function renderSettings(root, params) {
   const stats = root.querySelector('#stats');
   const result = root.querySelector('#import-result');
   const account = root.querySelector('#account');
+  const analyticsToggle = root.querySelector('#anonymous-analytics');
+
+  analyticsToggle.checked = productAnalyticsEnabled();
+  analyticsToggle.addEventListener('change', () => {
+    setProductAnalyticsEnabled(analyticsToggle.checked);
+    if (analyticsToggle.checked) productHeartbeat({ force: true });
+  });
+
+  async function refreshFeedbackIdentity() {
+    const user = isConfigured() ? await currentUser() : null;
+    root.querySelector('#feedback-email-wrap').hidden = Boolean(user);
+    root.querySelector('#feedback-identity').textContent = user?.email
+      ? `Feedback will include ${user.email} so Usman can reply. No transactions, amounts, or API keys are collected.`
+      : 'Feedback is anonymous unless you add a reply email. No transactions, amounts, or API keys are collected.';
+  }
+
+  root.querySelector('#send-feedback').addEventListener('click', async () => {
+    const button = root.querySelector('#send-feedback');
+    const msg = root.querySelector('#feedback-msg');
+    const message = root.querySelector('#feedback-message').value.trim();
+    const rating = Number(root.querySelector('#feedback-rating').value) || null;
+    if (message.length < 3) {
+      msg.className = 'warn';
+      msg.textContent = 'Write a little more first.';
+      return;
+    }
+    button.disabled = true;
+    msg.className = 'hint';
+    msg.textContent = 'Sending…';
+    try {
+      const response = await submitProductFeedback({
+        message,
+        rating,
+        replyEmail: root.querySelector('#feedback-email').value.trim(),
+      });
+      root.querySelector('#feedback-message').value = '';
+      msg.className = 'ok';
+      msg.textContent = response.replyTo
+        ? `Sent. A reply can go to ${response.replyTo}.`
+        : 'Sent anonymously. Thanks for helping shape Hisaab.';
+    } catch (error) {
+      msg.className = 'warn';
+      msg.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   const personalGemini = root.querySelector('#personal-gemini');
   const personalGeminiMsg = root.querySelector('#personal-gemini-msg');
@@ -896,7 +974,7 @@ Content-Type: text/plain
 
     account.querySelector('#signout').addEventListener('click', async () => {
       await signOut();
-      await refreshAccount();
+      await Promise.all([refreshAccount(), refreshFeedbackIdentity()]);
     });
   }
 
@@ -987,6 +1065,7 @@ Content-Type: text/plain
     refreshRules(),
     refreshSchedules(),
     refreshIngest(),
+    refreshFeedbackIdentity(),
   ]);
 
   if (params?.get('focus') === 'transfer') {
@@ -1009,6 +1088,7 @@ function organiseSettings(root) {
     ['Recurring payments', 'Keep regular bills and income from slipping past.', ['Recurring & reminders'], false],
     ['Automatic categories', 'File familiar purchases the same way every time.', ['Category rules'], false],
     ['Backup & corrections', 'Fix a balance, move old data, or download a copy.', ['Correct a balance', 'Import from Bluecoins', 'Download a backup', 'Data on this device'], false],
+    ['Review & privacy', 'Send an idea and choose whether to share anonymous counts.', ['Review Hisaab'], false],
     ['Reset', 'Start over on this device.', ['Erase local data'], false],
   ];
 

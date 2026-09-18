@@ -16,6 +16,7 @@ import { renderIcons } from './ui/icons.js';
 import { initAccent } from './ui/theme.js';
 import { getPendingProposalCount } from './views/review.js';
 import { maybeOfferOnboarding } from './ui/onboarding.js';
+import { startProductTelemetry } from './product-data.js';
 
 const views = {
   add: renderAdd,
@@ -115,6 +116,7 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('hisaab:review-count', (e) => setReviewBadge(e.detail));
 initAccent();
 renderIcons();
+startProductTelemetry();
 
 window.addEventListener('hashchange', show);
 
