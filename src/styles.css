@@ -2039,6 +2039,16 @@ button { -webkit-tap-highlight-color: transparent; }
   .cat-budgets { grid-template-columns: 1fr; }
 }
 
+.install-invite { margin-bottom: 14px; }
+.install-invite [data-install-now] { min-height: var(--tap); }
+.install-dialog { width: min(92vw, 430px); padding: 0; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.install-dialog::backdrop { background: rgb(0 0 0 / .58); }
+.install-dialog form { position: relative; padding: 24px; }
+.install-dialog h2 { margin: 4px 0 10px; }
+.install-dialog p { color: var(--muted); line-height: 1.55; }
+.install-dialog p b { color: var(--ink); }
+.install-dialog .dialog-close { position: absolute; top: 10px; right: 10px; padding: 7px 11px; color: var(--muted); background: transparent; border: 0; font-size: 1.4rem; }
+
 /* Accent picker. Each swatch shows the shade that will actually be used in the
    theme currently in force, not an average of the pair — picking "Rose" in the
    dark should show the pale rose the app will wear. */

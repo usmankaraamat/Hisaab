@@ -29,6 +29,7 @@ import {
   setProductAnalyticsEnabled,
   submitProductFeedback,
 } from '../product-data.js';
+import { requestInstall } from '../ui/install.js';
 
 export async function renderSettings(root, params) {
   root.innerHTML = `
@@ -46,6 +47,12 @@ export async function renderSettings(root, params) {
       <div class="card">
         <h3>Sync</h3>
         <div id="account"></div>
+      </div>
+
+      <div class="card">
+        <h3>Install Hisaab</h3>
+        <p class="hint">Add Hisaab to your home screen so it opens like an app and is easier to find.</p>
+        <button type="button" id="install-app">Install app</button>
       </div>
 
       <div class="card">
@@ -279,6 +286,8 @@ export async function renderSettings(root, params) {
   `;
 
   organiseSettings(root);
+
+  root.querySelector('#install-app').addEventListener('click', requestInstall);
 
   root.querySelector('#open-guide').addEventListener('click', (event) => {
     openOnboarding({ returnFocus: event.currentTarget });
@@ -1081,7 +1090,7 @@ function organiseSettings(root) {
   const byTitle = new Map(cards.map((card) => [card.querySelector('h3')?.textContent.trim(), card]));
 
   const groups = [
-    ['Account & sync', 'Use the same ledger on your devices.', ['Sync'], true],
+    ['Account & sync', 'Install Hisaab or use the same ledger on your devices.', ['Install Hisaab', 'Sync'], true],
     ['Smart capture', 'Optional categorisation and notification shortcuts.', ['AI categorisation (optional)', 'Payment notification import (advanced)'], false],
     ['Appearance', 'Choose how the app looks on this device.', ['Accent colour'], false],
     ['Balances & budget', 'Set what you have, what to protect, and where to slow down.', ['Current balances', 'Monthly spending setup', 'Savings goal', 'Category budgets'], false],

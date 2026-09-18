@@ -41,12 +41,21 @@ Deno.serve(async (request: Request) => {
   if (request.method !== 'POST') return json(request, { error: 'Method not allowed.' }, 405);
 
   const body = await request.json().catch(() => ({}));
-  const app = body.app === 'eatify' || body.app === 'hisaab' ? body.app : null;
+  const app = body.app === 'eatify' || body.app === 'hisaab' || body.app === 'portfolio' ? body.app : null;
   const installId = validUuid(body.installId) ? body.installId : null;
-  const kind = body.kind === 'activity' || body.kind === 'feedback' ? body.kind : null;
+  const kind = body.kind === 'activity' || body.kind === 'feedback' || body.kind === 'event' ? body.kind : null;
   if (!app || !installId || !kind) return json(request, { error: 'Invalid request.' }, 400);
 
   const user = await account(request);
+  if (kind === 'event') {
+    const allowed = new Set(['page_view','install_invite_shown','install_invite_dismissed','install_accepted','install_prompt_dismissed','install_ios_help','install_help','installed']);
+    const event = typeof body.event === 'string' && allowed.has(body.event) ? body.event : null;
+    const page = typeof body.page === 'string' ? body.page.replace(/[^a-z0-9/_-]/gi, '').slice(0, 120) : '';
+    if (!event || (app === 'portfolio' && event !== 'page_view') || (app !== 'portfolio' && event === 'page_view')) return json(request, { error: 'Invalid event.' }, 400);
+    const { error } = await admin.rpc('record_product_event', { p_app: app, p_install_id: installId, p_event: event, p_page: page });
+    return error ? json(request, { error: 'Could not record event.' }, 500) : json(request, { ok: true });
+  }
+  if (app === 'portfolio') return json(request, { error: 'Invalid request.' }, 400);
   if (kind === 'activity') {
     const { error } = await admin.rpc('record_product_activity', {
       p_app: app,
@@ -85,4 +94,3 @@ Deno.serve(async (request: Request) => {
     ? json(request, { error: 'Could not send that right now.' }, 500)
     : json(request, { ok: true, replyTo: user?.email ?? replyEmail ?? null });
 });
-

@@ -77,6 +77,12 @@ export async function submitProductFeedback({ message, rating, replyEmail }) {
   return request({ kind: 'feedback', message, rating, replyEmail });
 }
 
+export async function recordProductEvent(event, page = '') {
+  if (!productAnalyticsEnabled() || !navigator.onLine) return { skipped: true };
+  try { return await request({ kind: 'event', event, page }); }
+  catch (error) { return { error }; }
+}
+
 export function startProductTelemetry() {
   window.addEventListener('online', () => productHeartbeat());
   window.addEventListener('hisaab:meaningful-use', () => noteProductUse());
