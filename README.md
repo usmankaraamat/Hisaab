@@ -45,6 +45,10 @@ silent, and the evidence a re-run needs is still there.
 with status `pending`. The Review tab promotes them. A bad pass costs one tap.
 
 Each signed-in account receives five hosted enrichment batches per Karachi day.
+People who stay signed out can add a personal Gemini key and run categorisation
+directly from their device. The key stays on that device; Hisaab sends the batch
+descriptions to Gemini for suggestions, while its database remains local unless
+the person later chooses to sign in and sync.
 One batch may contain many transactions; empty and failed runs do not consume the
 allowance. A separate global ceiling protects the shared provider budget.
 

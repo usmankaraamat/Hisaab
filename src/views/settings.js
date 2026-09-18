@@ -45,9 +45,9 @@ export async function renderSettings(root, params) {
       <div class="card">
         <h3>AI categorisation <small>(optional)</small></h3>
         <p class="hint">
-          Hisaab includes five hosted categorisation runs each day. If you use
-          them all, you can continue with your own Gemini key. The key stays on
-          this device and is not included in sync or exports.
+          Hisaab includes five hosted categorisation runs each day when you sign in.
+          Your own Gemini key also works without an account, directly from this
+          device. The key is not included in sync or exports.
         </p>
         <label class="stack">Personal Gemini key
           <input type="password" id="personal-gemini" placeholder="optional" autocomplete="off" />

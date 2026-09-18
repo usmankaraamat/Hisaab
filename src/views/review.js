@@ -10,20 +10,29 @@ import { escapeHtml } from '../capture/entry.js';
 import { formatMinor } from '../lib/money.js';
 import { syncNow } from '../db/sync.js';
 import { invalidate } from '../capture/predict.js';
+import {
+  acceptLocalConfident,
+  countLocalPending,
+  countLocalProposals,
+  generateLocalProposals,
+  localProposals,
+  resolveLocalProposal,
+} from '../ai/local-enrich.js';
 
 const CONFIDENT = 0.7;
 
 export async function getPendingProposalCount() {
-  if (!isConfigured()) return 0;
+  const local = await countLocalProposals();
+  if (!isConfigured()) return local;
   const user = await currentUser();
-  if (!user) return 0;
+  if (!user) return local;
   const sb = await supabase();
   const { count, error } = await sb
     .from('enrichment_proposals')
     .select('id', { count: 'exact', head: true })
     .eq('status', 'pending');
-  if (error) return 0;
-  return count ?? 0;
+  if (error) return local;
+  return local + (count ?? 0);
 }
 
 export async function renderReview(root) {
@@ -36,38 +45,39 @@ export async function renderReview(root) {
 }
 
 async function paint(body) {
-  if (!isConfigured()) {
-    body.innerHTML =
-      '<p class="hint">Sync is not configured, so there is nothing to review yet. Enrichment runs server-side.</p>';
-    return;
+  const personalKey = localStorage.getItem('hisaab.personalGeminiKey') || '';
+  const localWaiting = await localProposals();
+  let sb = null;
+  let user = null;
+  let pendingTxns = await countLocalPending();
+  let remoteWaiting = [];
+
+  if (isConfigured()) {
+    sb = await supabase();
+    user = await currentUser();
+  }
+  if (user) {
+    const [{ count }, { data: proposals, error }] = await Promise.all([
+      sb
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .is('enriched_at', null)
+        .eq('deleted', false),
+      sb
+        .from('enrichment_proposals')
+        .select('id, transaction_id, proposed, confidence, transactions(raw_name, amount_minor, direction, occurred_at)')
+        .eq('status', 'pending')
+        .order('confidence', { ascending: true }),
+    ]);
+    if (error) {
+      body.innerHTML = `<p class="warn">${escapeHtml(error.message)}</p>`;
+      return;
+    }
+    pendingTxns = count ?? 0;
+    remoteWaiting = (proposals ?? []).map((proposal) => ({ ...proposal, local: false }));
   }
 
-  const sb = await supabase();
-  const user = await currentUser();
-  if (!user) {
-    body.innerHTML = '<p class="hint">Sign in on the Settings tab to run enrichment.</p>';
-    return;
-  }
-
-  const [{ count: pendingTxns }, { data: proposals, error }] = await Promise.all([
-    sb
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .is('enriched_at', null)
-      .eq('deleted', false),
-    sb
-      .from('enrichment_proposals')
-      .select('id, transaction_id, proposed, confidence, transactions(raw_name, amount_minor, direction, occurred_at)')
-      .eq('status', 'pending')
-      .order('confidence', { ascending: true }),
-  ]);
-
-  if (error) {
-    body.innerHTML = `<p class="warn">${escapeHtml(error.message)}</p>`;
-    return;
-  }
-
-  const waiting = proposals ?? [];
+  const waiting = [...localWaiting, ...remoteWaiting];
   window.dispatchEvent(new CustomEvent('hisaab:review-count', { detail: waiting.length }));
   const confident = waiting.filter((p) => (p.confidence ?? 0) >= CONFIDENT);
   const uncertain = waiting.filter((p) => (p.confidence ?? 0) < CONFIDENT);
@@ -78,15 +88,18 @@ async function paint(body) {
         <dt>Not yet categorised</dt><dd>${pendingTxns ?? 0}</dd>
         <dt>Waiting on you</dt><dd>${waiting.length}</dd>
       </dl>
+      ${!user ? `<p class="hint">${personalKey
+        ? 'Using your Gemini key on this device. Sign-in is not required.'
+        : 'Sign in for the included allowance, or add your Gemini key in Settings.'}</p>` : ''}
       <p id="run-msg" class="hint"></p>
-      <button type="button" id="run">Categorise now</button>
+      ${user || personalKey ? '<button type="button" id="run">Categorise now</button>' : ''}
       ${confident.length ? `<button type="button" id="accept-all">Accept ${confident.length} confident</button>` : ''}
     </div>
     <div id="list"></div>`;
 
   const msg = body.querySelector('#run-msg');
 
-  body.querySelector('#run').addEventListener('click', async () => {
+  body.querySelector('#run')?.addEventListener('click', async () => {
     if (!localStorage.getItem('hisaab.aiDisclosure.v1')) {
       const ok = window.confirm(
         'Hisaab sends the uncategorised transaction descriptions in this batch to Google Gemini so it can suggest categories and tidy names. Amounts and dates are included for context.'
@@ -97,14 +110,19 @@ async function paint(body) {
     msg.className = 'hint';
     msg.textContent = 'Categorising…';
     try {
-      const personalKey = localStorage.getItem('hisaab.personalGeminiKey') || '';
-      const { data, error: fnError } = await sb.functions.invoke('enrich', {
-        body: { limit: 300, ...(personalKey ? { personalKey } : {}) },
-      });
-      if (fnError) {
-        let detail = null;
-        try { detail = await fnError.context?.json(); } catch (_) { /* use SDK message */ }
-        throw new Error(detail?.message || fnError.message);
+      let data;
+      if (user) {
+        const { data: hostedData, error: fnError } = await sb.functions.invoke('enrich', {
+          body: { limit: 300, ...(personalKey ? { personalKey } : {}) },
+        });
+        if (fnError) {
+          let detail = null;
+          try { detail = await fnError.context?.json(); } catch (_) { /* use SDK message */ }
+          throw new Error(detail?.message || fnError.message);
+        }
+        data = hostedData;
+      } else {
+        data = await generateLocalProposals(personalKey, { limit: 300 });
       }
       if (data?.error) throw new Error(data.error);
       msg.className = 'ok';
@@ -121,14 +139,18 @@ async function paint(body) {
   body.querySelector('#accept-all')?.addEventListener('click', async () => {
     msg.className = 'hint';
     msg.textContent = 'Applying…';
-    const { data, error: rpcError } = await sb.rpc('accept_pending', { min_confidence: CONFIDENT });
-    if (rpcError) {
-      msg.className = 'warn';
-      msg.textContent = rpcError.message;
-      return;
+    let applied = await acceptLocalConfident(CONFIDENT);
+    if (user) {
+      const { data, error: rpcError } = await sb.rpc('accept_pending', { min_confidence: CONFIDENT });
+      if (rpcError) {
+        msg.className = 'warn';
+        msg.textContent = rpcError.message;
+        return;
+      }
+      applied += Number(data) || 0;
     }
     msg.className = 'ok';
-    msg.textContent = `Applied ${data} proposal(s).`;
+    msg.textContent = `Applied ${applied} proposal(s).`;
     await syncNow().catch(() => {});
     invalidate();
     await paint(body);
@@ -189,13 +211,17 @@ function card(p, body) {
   el.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
-    const sb = await supabase();
-    const fn = btn.dataset.act === 'accept' ? 'accept_proposal' : 'reject_proposal';
     btn.disabled = true;
-    const { error } = await sb.rpc(fn, { p_id: p.id });
-    if (error) {
-      btn.disabled = false;
-      return;
+    if (p.local) {
+      await resolveLocalProposal(p.id, { accept: btn.dataset.act === 'accept' });
+    } else {
+      const sb = await supabase();
+      const fn = btn.dataset.act === 'accept' ? 'accept_proposal' : 'reject_proposal';
+      const { error } = await sb.rpc(fn, { p_id: p.id });
+      if (error) {
+        btn.disabled = false;
+        return;
+      }
     }
     await syncNow().catch(() => {});
     invalidate();

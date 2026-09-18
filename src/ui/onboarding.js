@@ -42,7 +42,7 @@ const SETTINGS_HELP = {
   'Smart capture': {
     intro: 'These shortcuts tidy or import entries. Normal manual capture does not depend on them.',
     items: [
-      '<b>AI categorisation:</b> Hisaab includes up to five hosted categorisation runs a day. Add your own Gemini key only if you regularly need more; it stays on this device.',
+      '<b>AI categorisation:</b> signed-in accounts get five hosted runs a day. Your own Gemini key works without signing in and stays on this device.',
       '<b>Payment notification import:</b> an advanced setup for forwarding bank or wallet notifications from an Android automation app. “Paste a message” on the Add screen is the easier option.',
       '<b>Good first setup:</b> leave both options alone. Add them later if manual categories or pasted messages start feeling repetitive.',
     ],
