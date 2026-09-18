@@ -54,7 +54,7 @@ nothing else to configure, and no secret ships to the browser.
 1. Open Hisaab → **Settings**.
 2. Under **Sync**, make sure you are signed in. Auto-capture needs an account:
    the token is what ties a forwarded message to it.
-3. Scroll to **Auto-capture** → tap **Generate my token**.
+3. Open **Payment notification import** → tap **Generate my token**.
 4. Two values appear. Keep the page open, or copy both into a note — you are
    about to paste them into MacroDroid:
    - **Endpoint** — the URL, ending in `/functions/v1/ingest`
@@ -164,7 +164,7 @@ Android builds do not deliver the broadcast the normal trigger listens for. RCS
 `401 unknown token` means the server does not recognise the token. Almost always
 this is a token that was generated on the phone while signed out, so it was
 never registered against an account — the macro is correct and the endpoint is
-right to refuse it. Open **Settings → Auto-capture** while signed in: the app
+right to refuse it. Open **Settings → Payment notification import** while signed in: the app
 re-registers the token and the line under it says which state you are in. You do
 not have to change the macro, because the token itself has not changed.
 
@@ -223,7 +223,7 @@ A token in the header or the query string wins over one in the body.
 | Symptom | Cause |
 | --- | --- |
 | Nothing ever arrives | *Pull forwarded messages* is off in Settings, or you are signed out. |
-| `401 unknown token` | The server has never seen that token. Open **Settings → Auto-capture**: it re-registers the token and says whether it worked. If it asks you to sign in, that is the cause — a token generated while signed out lives only on the phone. |
+| `401 unknown token` | The server has never seen that token. Open **Settings → Payment notification import**: it re-registers the token and says whether it worked. If it asks you to sign in, that is the cause — a token generated while signed out lives only on the phone. |
 | `400 a message body is required` | Magic text did not resolve. Pick it from MacroDroid's list instead of typing it. |
 | Worked, then stopped | Battery optimisation killed the listener. Set MacroDroid to **Unrestricted**. |
 | OTPs and promos in the inbox | Add the *Contains text* filter (`Rs` / `PKR`) to the trigger. |

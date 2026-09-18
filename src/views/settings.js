@@ -22,11 +22,20 @@ import { syncNow } from '../db/sync.js';
 import { ensureIngestToken } from '../db/ingest.js';
 import { escapeHtml } from '../capture/entry.js';
 import { ACCENTS, currentAccent, setAccent } from '../ui/theme.js';
+import { createSettingsHelp, openOnboarding } from '../ui/onboarding.js';
 
 export async function renderSettings(root, params) {
   root.innerHTML = `
     <section class="settings">
       <h2>Settings</h2>
+
+      <div class="settings-guide-card">
+        <div>
+          <b>Not sure what any of this does?</b>
+          <span>Start with the quick tour, then open “How to set this up” inside any section.</span>
+        </div>
+        <button type="button" id="open-guide">Open quick tour</button>
+      </div>
 
       <div class="card">
         <h3>Sync</h3>
@@ -34,12 +43,11 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
-        <h3>AI provider <small>(advanced)</small></h3>
+        <h3>AI categorisation <small>(optional)</small></h3>
         <p class="hint">
-          Hisaab includes five hosted categorisation batches each day. If you use
-          them all, you can continue with your own Gemini key. It stays in this
-          browser, is sent only to Hisaab's Edge Function for the request, and is
-          never synced or exported.
+          Hisaab includes five hosted categorisation runs each day. If you use
+          them all, you can continue with your own Gemini key. The key stays on
+          this device and is not included in sync or exports.
         </p>
         <label class="stack">Personal Gemini key
           <input type="password" id="personal-gemini" placeholder="optional" autocomplete="off" />
@@ -51,21 +59,18 @@ export async function renderSettings(root, params) {
       <div class="card">
         <h3>Accent colour</h3>
         <p class="hint">
-          The colour of Save, the active tab, links and every “under pace” figure. Each one
-          is a pair — a dark shade for the light theme, a pale one for dark — so it stays
-          readable either way. Applies at once, on this device.
+          Changes the colour of buttons, links, and the active tab on this device.
+          Tap a colour to see it straight away.
         </p>
         <div class="accent-picker" id="accent-picker" role="radiogroup" aria-label="Accent colour"></div>
       </div>
 
       <div class="card">
-        <h3>Budget</h3>
+        <h3>Monthly spending setup</h3>
         <p class="hint">
-          "Money left" counts forward from the start of the month — the 1st, or the first
-          Monday if the 1st is a weekend, since that is when pay dated the 1st clears. Set an
-          opening balance to anchor it to what you actually hold instead; a balance set later
-          in the month wins over the month start.
-          A savings target is subtracted <em>before</em> the daily allowance, not left over after it.
+          Opening balance tells Hisaab how much money you started the period with. You can
+          leave it blank after setting Current balances. A savings target protects that amount
+          before Hisaab works out what is safe to spend each day.
         </p>
         <label class="stack">Opening balance
           <input type="text" id="opening" inputmode="decimal" placeholder="e.g. 42000" />
@@ -80,12 +85,11 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
-        <h3>Essential balance</h3>
+        <h3>Current balances</h3>
         <p class="hint">
-          Keep the account you use for everyday essentials separate from money parked in
-          the bank. Enter both balances as they stand now. This takes a snapshot: entries
-          before setup remain history and do not change either balance. Starting balances
-          sync with your signed-in account after the first successful sync.
+          Essential is money you normally spend from. Other is money you are keeping aside.
+          Enter what you have right now; older entries stay in your history. If you only use
+          one account, put its full balance in Essential and enter 0 for Other.
         </p>
         <label class="stack">Essential account now
           <input type="text" id="funding-essential" inputmode="decimal" placeholder="e.g. 42000" />
@@ -173,11 +177,10 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
-        <h3>Capture rules</h3>
+        <h3>Category rules</h3>
         <p class="hint">
-          Anything you type containing the match text is filed under its category at capture,
-          before the model runs. Add one here, or tap “remember” when you fix a category in
-          History.
+          A rule puts familiar purchases in the same category every time. Add one here, or
+          tap “remember” after fixing a category in History.
         </p>
         <div id="rules-list"></div>
         <div class="rule-add">
@@ -188,11 +191,10 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
-        <h3>Count your cash</h3>
+        <h3>Correct a balance</h3>
         <p class="hint">
-          Tracked balances drift — a missed entry, a rounding, a note handed over and
-          forgotten. Count what you actually hold and the difference is recorded as an
-          adjustment, so the balance stays worth reading.
+          If Hisaab and your real balance stop matching, enter what you actually have.
+          The difference is recorded as a correction so your history still adds up.
         </p>
         <p id="recon-now" class="hint"></p>
         <label class="stack">What you actually have
@@ -205,16 +207,16 @@ export async function renderSettings(root, params) {
           </select>
         </label>
         <p id="recon-msg" class="hint"></p>
-        <button type="button" id="do-recon">Reconcile</button>
+        <button type="button" id="do-recon">Correct balance</button>
       </div>
 
       <div class="card">
-        <h3>Auto-capture <small>(advanced)</small></h3>
+        <h3>Payment notification import <small>(advanced)</small></h3>
         <p class="hint">
-          Forward payment notifications automatically. An automation app on your phone
-          (MacroDroid, Tasker, HTTP Shortcuts) posts each notification to your private
-          endpoint; the app turns them into “To be resolved” items. One-time setup — see
-          <code>docs/auto-capture.md</code>. Paste and share both work with no setup.
+          This lets an Android automation app forward bank or wallet notifications into
+          “To be resolved”. It takes a one-time technical setup; see
+          <code>docs/auto-capture.md</code>. For the simple version, use “Paste a message”
+          on the Add screen instead.
         </p>
         <div id="ingest-box"></div>
       </div>
@@ -227,18 +229,18 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
-        <h3>Export</h3>
-        <p class="hint">Bluecoins-compatible CSV. You are never locked in here.</p>
-        <button type="button" id="export">Download CSV</button>
+        <h3>Download a backup</h3>
+        <p class="hint">Downloads your entries as a Bluecoins-compatible CSV file.</p>
+        <button type="button" id="export">Download backup</button>
       </div>
 
       <div class="card">
-        <h3>Stored locally</h3>
+        <h3>Data on this device</h3>
         <dl id="stats"></dl>
       </div>
 
       <div class="card danger">
-        <h3>Reset</h3>
+        <h3>Erase local data</h3>
         <p class="hint">Deletes every transaction and event on this device.</p>
         <button type="button" id="reset">Erase all data</button>
       </div>
@@ -246,6 +248,10 @@ export async function renderSettings(root, params) {
   `;
 
   organiseSettings(root);
+
+  root.querySelector('#open-guide').addEventListener('click', (event) => {
+    openOnboarding({ returnFocus: event.currentTarget });
+  });
 
   /* Accent colour. A live preview is the whole point: the swatches sit inside
    * the app they recolour, so the choice is judged in place rather than from a
@@ -332,7 +338,7 @@ export async function renderSettings(root, params) {
     saveFunding.hidden = configured;
     transferBox.hidden = !configured;
     fundingAt.textContent = configured
-      ? `Set on ${new Date(funding.at).toLocaleString()}. These are your live balances. Use Count your cash to correct either one; marking a newer entry as non-essential moves its amount between them. Older entries stay as historical records.`
+      ? `Set on ${new Date(funding.at).toLocaleString()}. These are your live balances. Use Correct a balance to fix either one; marking a newer entry as non-essential moves its amount between them. Older entries stay as historical records.`
       : 'Not set. Until you save this, the app uses the original single-balance budget.';
 
     // There must be one balance anchor. The split snapshot is the newer, more
@@ -996,21 +1002,23 @@ function organiseSettings(root) {
   const byTitle = new Map(cards.map((card) => [card.querySelector('h3')?.textContent.trim(), card]));
 
   const groups = [
-    ['Account & sync', 'Your current sync state stays visible.', ['Sync'], true],
-    ['Capture intelligence', 'Hosted categorisation, optional fallback, and notification forwarding.', ['AI provider (advanced)', 'Auto-capture (advanced)'], false],
-    ['Appearance', 'How the app looks on this device.', ['Accent colour'], false],
-    ['Budget', 'Balances, savings goals, and category limits.', ['Essential balance', 'Budget', 'Savings goal', 'Category budgets'], false],
-    ['Recurring', 'Charges and income that should surface when due.', ['Recurring & reminders'], false],
-    ['Rules', 'Deterministic filing rules applied at capture.', ['Capture rules'], false],
-    ['Data & repair', 'Reconcile, import, export, and inspect local storage.', ['Count your cash', 'Import from Bluecoins', 'Export', 'Stored locally'], false],
-    ['Danger zone', 'Destructive actions are kept separate at the bottom.', ['Reset'], false],
+    ['Account & sync', 'Use the same ledger on your devices.', ['Sync'], true],
+    ['Smart capture', 'Optional categorisation and notification shortcuts.', ['AI categorisation (optional)', 'Payment notification import (advanced)'], false],
+    ['Appearance', 'Choose how the app looks on this device.', ['Accent colour'], false],
+    ['Balances & budget', 'Set what you have, what to protect, and where to slow down.', ['Current balances', 'Monthly spending setup', 'Savings goal', 'Category budgets'], false],
+    ['Recurring payments', 'Keep regular bills and income from slipping past.', ['Recurring & reminders'], false],
+    ['Automatic categories', 'File familiar purchases the same way every time.', ['Category rules'], false],
+    ['Backup & corrections', 'Fix a balance, move old data, or download a copy.', ['Correct a balance', 'Import from Bluecoins', 'Download a backup', 'Data on this device'], false],
+    ['Reset', 'Start over on this device.', ['Erase local data'], false],
   ];
 
   for (const [title, note, names, open] of groups) {
     const details = document.createElement('details');
-    details.className = `settings-group${title === 'Danger zone' ? ' danger-zone' : ''}`;
+    details.className = `settings-group${title === 'Reset' ? ' danger-zone' : ''}`;
     if (open) details.open = true;
     details.innerHTML = `<summary><span><b>${title}</b><small>${note}</small></span></summary>`;
+    const help = createSettingsHelp(title);
+    if (help) details.append(help);
     for (const name of names) {
       const card = byTitle.get(name);
       if (!card) continue;

@@ -184,7 +184,7 @@ someone four things and meaning one of them as a gift is ordinary.
 
 If the money you use for groceries, rides and everyday essentials is separate
 from money parked in the bank, set both current balances once in **Settings →
-Essential balance**. That creates a timestamped snapshot. From then on the app
+Current balances**. That creates a timestamped snapshot. From then on the app
 shows the live **Essential**, **Other bank money**, and their **Total** on the
 Spending screen. New entries draw from Essential by default. In History, tap
 the **Essential** chip beside a newer transaction to move it to Other bank
@@ -198,7 +198,7 @@ spending remain unchanged. Delete that one History row to undo the move.
 
 Rows before the snapshot are deliberately historical: they show “Before balance
 setup” and cannot be moved, because applying old purchases to a balance stated
-today would double-count them. Use the source selector in **Count your cash** to
+today would double-count them. Use the source selector in **Correct a balance** to
 reconcile Essential or Other separately. After the first successful account
 sync, the starting snapshot follows the account to your other devices.
 
@@ -239,7 +239,7 @@ work.
 ## Reconciling is a correction, not a reset
 
 Tracked balances drift — a missed entry, a rounding, a note handed over and
-forgotten. **Settings → Count your cash** takes what you actually hold and
+forgotten. **Settings → Correct a balance** takes what you actually hold and
 records the difference as a single **Reconcile cash** row: an incoming entry when
 you held more than tracked, an outgoing one when you held less. Cash then matches
 what you counted, and because it is an ordinary dated row inside the current

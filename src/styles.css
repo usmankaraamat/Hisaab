@@ -1339,6 +1339,77 @@ body.sheet-open { overflow: hidden; }
 button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
+/* Optional first-run help. The invitation sits beside normal capture content;
+   the full guide only opens after the user asks for it. */
+.onboarding-invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 0 18px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: var(--radius-sm);
+}
+.onboarding-invite b,
+.onboarding-invite span { display: block; }
+.onboarding-invite b { margin-bottom: 2px; font-size: .88rem; }
+.onboarding-invite span { color: var(--muted); font-size: .78rem; }
+.onboarding-invite-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.onboarding-invite .link {
+  min-height: 38px;
+  padding: 6px 8px;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.onboarding-invite [data-guide-dismiss] { color: var(--muted); }
+
+.onboarding-dialog {
+  width: min(calc(100% - 28px), 520px);
+  max-height: min(720px, calc(100dvh - 32px));
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 32px 90px -32px rgba(0, 0, 0, .85);
+}
+.onboarding-dialog::backdrop { background: rgba(5, 10, 16, .68); }
+.onboarding-panel { display: grid; min-height: 410px; padding: 20px; }
+.onboarding-topline,
+.onboarding-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.onboarding-count { color: var(--muted); font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.onboarding-close {
+  min-height: 38px;
+  padding: 6px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.onboarding-copy { align-self: center; padding: 28px 2px; }
+.onboarding-eyebrow { display: block; margin-bottom: 8px; color: var(--accent); font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.onboarding-copy h2 { margin: 0 0 12px; font-size: clamp(1.65rem, 7vw, 2.2rem); line-height: 1.08; letter-spacing: -.035em; }
+.onboarding-body { max-width: 44ch; margin: 0; color: var(--muted); font-size: .98rem; }
+.onboarding-example { display: block; width: fit-content; margin-top: 20px; padding: 10px 12px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: .88rem; }
+.onboarding-actions { align-self: end; }
+.onboarding-actions button {
+  min-width: 92px;
+  min-height: var(--tap);
+  padding: 9px 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.onboarding-actions button:disabled { opacity: .35; }
+.onboarding-actions .onboarding-next { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -1856,6 +1927,33 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 /* Settings use a small number of named disclosure groups. */
+.settings-guide-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: var(--radius-md);
+}
+.settings-guide-card b,
+.settings-guide-card span { display: block; }
+.settings-guide-card b { margin-bottom: 3px; font-size: .9rem; }
+.settings-guide-card span { color: var(--muted); font-size: .77rem; }
+.settings-guide-card button {
+  flex: none;
+  min-height: var(--tap);
+  padding: 9px 13px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
 .settings-group {
   margin-bottom: 10px;
   background: var(--surface);
@@ -1887,6 +1985,25 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .settings-group[open] > summary::after { transform: rotate(225deg); }
 .settings-group[open] > summary { border-bottom: 1px solid var(--line); }
+.settings-help {
+  margin: 12px 14px 2px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.settings-help > summary {
+  min-height: var(--tap);
+  padding: 11px 13px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.settings-help-body { padding: 0 13px 13px; color: var(--muted); font-size: .82rem; }
+.settings-help-body p { margin: 0 0 9px; }
+.settings-help-body ul { margin: 0; padding-left: 19px; }
+.settings-help-body li + li { margin-top: 8px; }
+.settings-help-body b { color: var(--ink); }
 .settings-subcard.card {
   margin: 0 14px;
   padding: 16px 2px;
@@ -1904,6 +2021,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .settings-group.danger-zone .settings-subcard { color: var(--critical); }
 
 @media (max-width: 430px) {
+  .onboarding-invite,
+  .settings-guide-card { align-items: flex-start; flex-direction: column; }
+  .onboarding-invite-actions { width: 100%; justify-content: flex-start; }
+  .settings-guide-card button { width: 100%; }
   .settings-subcard.card button:not(.cat):not(.ov-row):not(.link) { width: 100%; margin-left: 0 !important; }
   .rule-add, .sched-add { grid-template-columns: 1fr; }
   .rule-add { flex-direction: column; }

@@ -15,6 +15,7 @@ import { parseHash, go } from './nav.js';
 import { renderIcons } from './ui/icons.js';
 import { initAccent } from './ui/theme.js';
 import { getPendingProposalCount } from './views/review.js';
+import { maybeOfferOnboarding } from './ui/onboarding.js';
 
 const views = {
   add: renderAdd,
@@ -86,6 +87,7 @@ async function show() {
   sectionTitle.textContent = TITLES[name] || TITLES.add;
   setMore(false);
   await render(view, params);
+  if (name === 'add' || !views[name]) maybeOfferOnboarding(view);
   refreshReviewBadge();
 }
 
