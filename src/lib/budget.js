@@ -349,14 +349,18 @@ export function budgetSummary(
   const owed = ledgerTotals(book);
 
 
-  const savingsRemainingMinor = Math.max(0, savingsTargetMinor - savedMinor);
-  // Money owed to other people is as spoken for as a bill that has not arrived
-  // yet. Money owed *to* you is not added back — it may never come, and a
-  // spending limit should never be inflated by an optimistic assumption.
+  // A withdrawal reopens the gap to the target, but never past it. Unclamped,
+  // cashing out 24,000 against 15,000 deposited reserved 9,000 with no target
+  // set at all, and took it from the essential allowance.
+  const savingsRemainingMinor = Math.max(0, savingsTargetMinor - Math.max(0, savedMinor));
+  // Debts stay out in both directions. Money you owe leaves the balance when the
+  // repayment is logged, not before: reserving it early left a number that
+  // matched neither the account nor anything spent, which made the account
+  // impossible to check against. Money owed *to* you is not added back either —
+  // it may never come.
   const allowanceCashMinor = fundingBalance ? fundingBalance.essentialMinor : cashMinor;
   const allowanceCommittedMinor = fundingBalance ? committedEssentialMinor : committedMinor;
-  const safeToSpendMinor =
-    allowanceCashMinor - allowanceCommittedMinor - savingsRemainingMinor - owed.iOweMinor;
+  const safeToSpendMinor = allowanceCashMinor - allowanceCommittedMinor - savingsRemainingMinor;
 
   return {
     since: new Date(sinceMs).toISOString(),

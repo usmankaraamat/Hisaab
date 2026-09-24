@@ -147,10 +147,9 @@ const endOfDay = (s) => (s ? new Date(`${s}T23:59:59.999`).toISOString() : null)
  *
  * What is outstanding in either direction lives on the Ledger and nowhere else —
  * two screens netting the same debts by slightly different rules is what made
- * one person read as 4,050 here and 4,600 there. Only the figure that enters
- * this card's arithmetic is repeated: money you owe reduces what is safe to
- * spend, while money owed to you deliberately does not increase it, so it has
- * no business on this screen at all.
+ * one person read as 4,050 here and 4,600 there. Neither direction enters this
+ * card's arithmetic — a debt moves the balance only when its repayment is
+ * logged — so the line is a reminder, not a deduction.
  */
 function ledgerLine(b) {
   if (!b.owedToMeMinor && !b.iOweMinor) return '';
@@ -264,8 +263,8 @@ function leftCard(b) {
 
 /**
  * The same subtraction as the card above, drawn as a bridge so the arithmetic is
- * visible rather than asserted: the wallet, less the bills and the savings and
- * what you owe, is what is safe. Each chip steps down from where the last left
+ * visible rather than asserted: the wallet, less the bills and the savings, is
+ * what is safe. Each chip steps down from where the last left
  * off; the final bar is the answer, green when there is room and red when the
  * period is already over budget. Skipped entirely when nothing is deducted —
  * there is no story to draw when cash and safe are the same number.
@@ -277,7 +276,6 @@ function bridgeCard(b) {
   const steps = [];
   if (b.committedMinor) steps.push({ label: 'Bills', minor: -b.committedMinor });
   if (b.savingsRemainingMinor) steps.push({ label: 'To save', minor: -b.savingsRemainingMinor });
-  if (b.iOweMinor) steps.push({ label: 'You owe', minor: -b.iOweMinor });
   if (!steps.length) return '';
 
   const { y, bars, levels } = bridgeLayout({ startMinor: b.funding ? b.essentialMinor : b.cashMinor, steps }, { frame: WF });

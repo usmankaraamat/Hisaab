@@ -335,17 +335,17 @@ check('and it is a debt', b.iOweMinor, 50000);
 // 13,000,000 in, less 100,000 + 5,000,000 + 44,000 out. The 50,000 Harry paid
 // never touched the wallet, and the July row is outside the period.
 check('cash counts everything that actually moved', b.cashMinor, 7856000);
-check('what you owe is subtracted from what is safe to spend',
-  b.safeToSpendMinor, 7856000 - 50000);
+check('what you owe is not deducted until the repayment is logged',
+  b.safeToSpendMinor, 7856000);
 check('and what is owed to you is not added to it', b.owedToMeMinor, 44000);
 // Aug 8 12:00 to Sep 1 00:00 is 23 days and a half, and a part day still has
 // to be spent through, so it rounds up.
 check('the allowance divides by the days remaining', b.daysLeft, 24);
-check('the allowance is quoted in whole rupees', b.dailyMinor, 325200);
+check('the allowance is quoted in whole rupees', b.dailyMinor, 327300);
 
 const saving = budgetSummary(ledgerJuly, { savingsTargetMinor: 6000000, now: asOfAug8 });
 check('a savings target is deducted before the allowance, not after',
-  saving.safeToSpendMinor, 7856000 - 1000000 - 50000);
+  saving.safeToSpendMinor, 7856000 - 1000000);
 check('and only the part not yet saved', saving.savingsRemainingMinor, 1000000);
 check('a met target takes nothing further',
   budgetSummary(ledgerJuly, { savingsTargetMinor: 4000000, now: asOfAug8 }).savingsRemainingMinor, 0);
@@ -600,6 +600,12 @@ check('but it is still cash in hand', potSummary.cashMinor, 13000000 - 5000000 +
 check('withdrawing more than was put in this period goes negative',
   budgetSummary([potRows[0], pot('in', 1000000, '2026-08-06T10:00:00.000Z')],
     { now: asOfAug8 }).savedMinor, -1000000);
+const overdrawn = [potRows[0], pot('out', 1500000, '2026-08-03T14:00:00.000Z'),
+  pot('in', 2400000, '2026-08-06T10:00:00.000Z')];
+check('with no target, a net withdrawal reserves nothing',
+  budgetSummary(overdrawn, { now: asOfAug8 }).savingsRemainingMinor, 0);
+check('and with one, the gap never exceeds the target itself',
+  budgetSummary(overdrawn, { savingsTargetMinor: 1000000, now: asOfAug8 }).savingsRemainingMinor, 1000000);
 check('a savings withdrawal is not spending',
   categoryTotals(potRows).some((c) => c.category === 'Savings'), false);
 
