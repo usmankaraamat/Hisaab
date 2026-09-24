@@ -69,3 +69,20 @@ export function fundingSummary(rows, opening, now = new Date()) {
     totalMinor: essentialMinor + otherMinor,
   };
 }
+
+/**
+ * Pots a change pushed below zero, or deeper below it.
+ *
+ * Said at the moment of saving because that is the only moment a wrong-pot
+ * entry is cheap to fix: a 5,000 repair logged against Other took it to −1,826
+ * and went unnoticed until a reconcile the next day had to paper over it.
+ */
+export function overdrawnPots(before, after) {
+  if (!before || !after) return [];
+  return [
+    ['essentialMinor', 'Essential'],
+    ['otherMinor', 'Other bank'],
+  ]
+    .filter(([key]) => after[key] < 0 && after[key] < before[key])
+    .map(([key, label]) => ({ label, minor: after[key] }));
+}

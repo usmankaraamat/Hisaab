@@ -21,12 +21,13 @@ import {
   setMeta,
 } from '../db/local.js';
 import { parseNotification } from './notif.js';
-import { matchRule, ruleFields } from '../lib/rules.js';
+import { matchRule, ruleFields, learnedCategory } from '../lib/rules.js';
 import { dueSchedules, advanceSchedule, occurrenceKey } from '../lib/schedule.js';
 import { formatMinor, toMinor } from '../lib/money.js';
 import { surgeCheck } from '../lib/insights.js';
 import { syncNow } from '../db/sync.js';
 import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
+import { fundingSummary, overdrawnPots } from '../lib/funding.js';
 import { sparkPoints } from '../lib/chart.js';
 import { findDuplicate } from '../lib/dupes.js';
 import { learnPayee, recallPayee } from '../lib/payees.js';
@@ -208,7 +209,13 @@ export async function renderAdd(root) {
     if (fields) {
       input.category = fields.category;
       input.enriched_at = new Date().toISOString();
+      return input;
     }
+    // No rule, but history agrees on what this is: file it now. Unlike a rule
+    // it leaves the row pending, so the model can still tidy the name, and any
+    // category it suggests goes through Review as before.
+    const learned = learnedCategory(history, input.raw_name, input.direction);
+    if (learned) input.category = learned;
     return input;
   }
 
@@ -368,6 +375,17 @@ export async function renderAdd(root) {
       b.setAttribute('aria-pressed', String(active));
     }
     if (!silent) refreshPreview();
+  }
+
+  async function potsNow() {
+    return fundingSummary(history, await getMeta('budget.funding', null));
+  }
+
+  /** " · Other bank is now −Rs 1,476" when a save overdrew a pot, else "". */
+  function overdraftNote(before, after) {
+    return overdrawnPots(before, after)
+      .map((p) => ` · ${p.label} is now ${formatMinor(p.minor, { sign: '−' })}`)
+      .join('');
   }
 
   function showToast(message, action) {
@@ -716,6 +734,7 @@ export async function renderAdd(root) {
       e.preventDefault();
       const rows = readItems();
       if (rows.some((r) => !r.name || !r.amtMinor)) return;
+      const potsBefore = await potsNow();
 
       for (const it of rows) {
         const plan = planEntry(it.name, it.amtMinor, p.direction, { knownPeople: people });
@@ -751,12 +770,12 @@ export async function renderAdd(root) {
       await deletePending(p.id);
       invalidate();
       syncNow().catch(() => {});
-      showToast(
-        rows.length > 1
-          ? `Logged ${formatMinor(p.amountMinor)} across ${rows.length} entries`
-          : `Logged ${formatMinor(p.amountMinor)} · ${rows[0].name}`
-      );
       await refreshAll();
+      showToast(
+        (rows.length > 1
+          ? `Logged ${formatMinor(p.amountMinor)} across ${rows.length} entries`
+          : `Logged ${formatMinor(p.amountMinor)} · ${rows[0].name}`) + overdraftNote(potsBefore, await potsNow())
+      );
     });
 
     refreshSum();
@@ -892,6 +911,7 @@ export async function renderAdd(root) {
     if (!name || amountMinor === null || amountMinor <= 0) return;
     saving = true;
     try {
+      const potsBefore = await potsNow();
       // Capture the decision before clearing the field, which recomputes the plan.
       const commit = splitting() ? plan : null;
       const written = commit
@@ -904,10 +924,11 @@ export async function renderAdd(root) {
       refreshPreview();
       input.focus();
       invalidate();
+      await refreshAll();
       const summary =
-        written.length > 1
+        (written.length > 1
           ? `Saved ${formatMinor(amountMinor)} across ${written.length} entries`
-          : `Saved ${formatMinor(amountMinor)} · ${name}`;
+          : `Saved ${formatMinor(amountMinor)} · ${name}`) + overdraftNote(potsBefore, await potsNow());
       showToast(summary, {
         label: 'Undo',
         run: async () => {
@@ -916,7 +937,6 @@ export async function renderAdd(root) {
           await refreshAll();
         },
       });
-      await refreshAll();
     } catch (err) {
       showToast(`Couldn't save: ${err?.message || 'try again'}`);
     } finally {

@@ -1,5 +1,5 @@
 /* Focused monetary checks for the two-pot account ledger. */
-import { fundingSummary, fundingSource } from '../src/lib/funding.js';
+import { fundingSummary, fundingSource, overdrawnPots } from '../src/lib/funding.js';
 import { budgetSummary } from '../src/lib/budget.js';
 import { makeFundingTransfer } from '../src/lib/transfers.js';
 import { monthlySeries, savingsRate } from '../src/lib/trends.js';
@@ -138,5 +138,14 @@ const cardBillBudget = budgetSummary(cardBillRows, { funding: recurringFunding, 
 check('a recurring card bill does not reduce essential safe-to-spend or daily allowance',
   [cardBillBudget.committedMinor, cardBillBudget.totalCommittedMinor, cardBillBudget.safeToSpendMinor, cardBillBudget.dailyMinor],
   [0, 10_000, 100_000, 5_800]);
+
+
+const pots = (e, o) => ({ essentialMinor: e, otherMinor: o });
+check('a save that takes a pot below zero is reported',
+  overdrawnPots(pots(100, 352_400), pots(100, -147_600)), [{ label: 'Other bank', minor: -147_600 }]);
+check('a pot already below zero is reported again only when it drops further',
+  [overdrawnPots(pots(-500, 0), pots(-500, 0)).length, overdrawnPots(pots(-500, 0), pots(-900, 0)).length], [0, 1]);
+check('money coming into an overdrawn pot is not a warning',
+  overdrawnPots(pots(-900, 0), pots(-400, 0)), []);
 
 if (failures) process.exitCode = 1;

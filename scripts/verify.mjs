@@ -36,7 +36,7 @@ import { txnLabel, hasRewrite, ledgerLabel } from '../src/lib/label.js';
 import { rankSuggestions, referenceDays, slotOf, slotLabel } from '../src/capture/predict.js';
 import { parseNotification } from '../src/capture/notif.js';
 import { ACCENTS, DEFAULT_ACCENT, accentById } from '../src/ui/theme.js';
-import { matchRule, ruleFields, suggestMatch } from '../src/lib/rules.js';
+import { matchRule, ruleFields, suggestMatch, learnedCategory } from '../src/lib/rules.js';
 import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
 import { answerQuery } from '../src/lib/query.js';
 import { questionTerms, itemTotal, topItems } from '../src/lib/items.js';
@@ -386,6 +386,28 @@ check('the first matching rule wins',
   matchRule([{ match: 'a', category: 'X' }, { match: 'app', category: 'Y' }], 'apple')?.category, 'X');
 check('a rule contributes only a category', ruleFields(ruleset[0]), { category: 'Rides' });
 check('a suggested match is the first word', suggestMatch('Indrive Home-Office'), 'indrive');
+
+const past = (raw_name, category, day, extra = {}) =>
+  ({ raw_name, category, direction: 'out', source: 'manual', occurred_at: `2026-09-${day}T10:00:00.000Z`, ...extra });
+const rides = [past('Indrive Home-Gym', 'Rides', 10), past('Indrive Gym - Home', 'Rides', 11), past('Indrive Home-Office', 'Rides', 12)];
+check('three agreeing entries file the next one', learnedCategory(rides, 'Indrive Home-Gym'), 'Rides');
+check('rides group by provider, so a new route still counts', learnedCategory(rides, 'Indrive Office - Airport'), 'Rides');
+check('two are not enough', learnedCategory(rides.slice(1), 'Indrive Home-Gym'), null);
+check('the latest three must agree, so a re-filing is followed',
+  learnedCategory([...rides, past('Indrive Home-Gym', 'Transport', 13)], 'Indrive Home-Gym'), null);
+check('deleted, imported and incoming rows do not vote',
+  learnedCategory([rides[0], past('Indrive a - b', 'Rides', 13, { deleted: true }),
+    past('Indrive a - b', 'Rides', 14, { source: 'bluecoins' }), past('Indrive a - b', 'Rides', 15, { direction: 'in' })],
+    'Indrive Home-Gym'), null);
+
+const weekly = (raw_name, day) => ({ raw_name, amount_minor: 20000, direction: 'out', source: 'manual',
+  occurred_at: `2026-09-${day}T10:00:00.000Z` });
+check('a ride repeated a week apart is not a subscription',
+  subscriptions([weekly('Indrive Hospital - Home', 12), weekly('Indrive Hospital - Home', 19)],
+    { now: new Date('2026-09-24T00:00:00.000Z') }).length, 0);
+check('the same pattern on a bill still is',
+  subscriptions([weekly('Gym membership', 12), weekly('Gym membership', 19)],
+    { now: new Date('2026-09-24T00:00:00.000Z') }).length, 1);
 
 console.log('\n--- recurring schedules ---');
 check('a monthly schedule steps by a month',

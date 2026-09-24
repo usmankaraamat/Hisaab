@@ -15,6 +15,7 @@
 
 import {
   listTransactions,
+  allTransactions,
   deleteTransaction,
   updateTransaction,
   getMeta,
@@ -37,6 +38,7 @@ import {
 import { invalidate } from '../capture/predict.js';
 import { syncNow } from '../db/sync.js';
 import { isFundingTransfer, transferLabel } from '../lib/transfers.js';
+import { fundingSummary, overdrawnPots } from '../lib/funding.js';
 
 const DAY = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
@@ -373,6 +375,20 @@ function row(r, body, controls, funding) {
     toggle.disabled = true;
     const next = source === 'essential' ? 'other' : 'essential';
     try {
+      // Ask before a move overdraws a pot: that is how a 5,000 repair once took
+      // Other to −1,826 without anyone noticing.
+      const [rows, pots] = await Promise.all([allTransactions(), getMeta('budget.funding', null)]);
+      const moved = rows.map((x) => (x.id === r.id ? { ...x, funding_source: next } : x));
+      const overdrawn = overdrawnPots(fundingSummary(rows, pots), fundingSummary(moved, pots));
+      if (
+        overdrawn.length &&
+        !window.confirm(
+          `This takes ${overdrawn.map((p) => `${p.label} to ${formatMinor(p.minor, { sign: '−' })}`).join(' and ')}. Move it anyway?`
+        )
+      ) {
+        toggle.disabled = false;
+        return;
+      }
       await updateTransaction(r.id, { funding_source: next });
       invalidate();
       syncNow().catch(() => {});
@@ -452,7 +468,7 @@ function editor(r, body, controls) {
     <label>Category
       <select name="category">
         <option value=""${r.category ? '' : ' selected'}>—</option>
-        ${CATEGORIES.map(
+        ${(r.category && !CATEGORIES.includes(r.category) ? [r.category, ...CATEGORIES] : CATEGORIES).map(
           (c) => `<option value="${escapeHtml(c)}"${r.category === c ? ' selected' : ''}>${escapeHtml(c)}</option>`
         ).join('')}
       </select>
@@ -518,7 +534,9 @@ function editor(r, body, controls) {
       occurred_at: occurredAt.toISOString(),
     };
 
-    if (name !== r.raw_name || amountMinor !== r.amount_minor) {
+    // Only a new name can change what a row is. Clearing on an amount edit wiped
+    // a "Reconcile cash" row's category, and the correction then read as income.
+    if (name !== r.raw_name) {
       Object.assign(patch, {
         category: null,
         display_name: null,

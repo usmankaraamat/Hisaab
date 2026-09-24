@@ -138,6 +138,9 @@ export function subscriptions(rows, { minSamples = 2, now = new Date(), amountTo
 
   for (const g of groupRows(rows).values()) {
     if (g.rows.length < Math.max(2, minSamples)) continue;
+    // A ride is bought on the day, never billed. Two Hospital → Home trips a
+    // week apart once read as a weekly 200 due, reserved from the allowance.
+    if (g.key.startsWith('ride:')) continue;
 
     const gaps = [];
     for (let i = 1; i < g.rows.length; i++) {
