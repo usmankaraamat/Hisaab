@@ -7,3 +7,7 @@ verify_jwt = true
 
 [functions.product-data]
 verify_jwt = false
+
+[functions.ingest]
+# Called by a phone automation carrying a per-user ingest token, not a JWT.
+verify_jwt = false
