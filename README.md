@@ -240,6 +240,27 @@ The savings target is deducted **before** the allowance, not left over after it.
 Saving what remains at the end of the month is exactly the thing that does not
 work.
 
+### Spending pace
+
+The allowance says what is safe today; it cannot say whether the month is going
+at a speed it can survive. **Settings → Monthly plan** takes the monthly income,
+the payday, a buffer, and the fixed costs that leave every month regardless (a
+remittance, subscriptions). The plan is income − fixed − buffer, and the card
+directly under the input tracks it from payday to payday:
+
+- spending so far against the plan, with a marker where an even burn would be
+  by the end of today
+- how many days of plan have gone in how many days, and the date the plan and
+  the buffer run out at the current rate
+- what per day from here gets back on plan
+
+Fixed costs are kept out of the pace. They are matched by name, as whole words,
+against what was typed — "remittance" matches "ammi remittance 30000", and
+"netflix, spotify" answers to either — so a remittance day does not read as a
+spending spree, and the card shows how much of the fixed total has been paid.
+The pure logic lives in `src/lib/plan.js`. The plan is stored on this device
+and is not synced.
+
 ## Reconciling is a correction, not a reset
 
 Tracked balances drift — a missed entry, a rounding, a note handed over and

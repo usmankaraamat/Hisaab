@@ -2092,3 +2092,35 @@ button { -webkit-tap-highlight-color: transparent; }
     background: color-mix(in srgb, var(--swatch-dark) 16%, transparent);
   }
 }
+
+/* Spending pace: the monthly plan, under the input, read before spending. */
+.pace { margin-top: 14px; }
+.pace-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.pace-day { color: var(--muted); font-size: .78rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.pace .allowance-main { font-size: clamp(1.35rem, 6.5vw, 1.8rem); }
+.pace-bar {
+  position: relative;
+  display: block;
+  height: 8px;
+  margin: 8px 0 6px;
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+  border-radius: 999px;
+}
+.pace-fill { position: absolute; inset: 0 auto 0 0; background: var(--positive); border-radius: inherit; }
+.pace-fast .pace-fill { background: var(--warning); }
+.pace.over .pace-fill { background: var(--critical); }
+/* Where an even burn would be by the end of today. */
+.pace-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+.pace-line b { color: var(--ink); }
+.pace-fast .pace-line b { color: var(--warning); }
+.pace.over .pace-line b { color: var(--critical); }
+.pace-fixed { color: var(--muted); font-size: .76rem; }
+
+/* Monthly plan in Settings. */
+.plan-fixed-add { display: grid; grid-template-columns: 1fr 7.5rem auto; gap: 8px; margin-top: 10px; }
+.plan-fixed-add input {
+  width: 100%; min-width: 0; padding: 9px 11px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.plan-sum { margin: 14px 0 6px; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.plan-sum b { color: var(--text); }
