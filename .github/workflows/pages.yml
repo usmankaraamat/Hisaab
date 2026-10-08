@@ -72,10 +72,14 @@ jobs:
       - if: steps.secrets.outputs.ready == 'true'
         uses: actions/checkout@v4
 
+      # Pinned, not `latest`: resolving `latest` is an unauthenticated GitHub
+      # API call, and a rate-limited runner failed the whole deploy on it.
+      # 2.117.0 was the latest release when the last good deploy ran (24 Sep
+      # 2026). Bump it deliberately.
       - if: steps.secrets.outputs.ready == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       - if: steps.secrets.outputs.ready == 'true'
         run: supabase link --project-ref "$PROJECT_REF"
