@@ -29,6 +29,7 @@ import { syncNow } from '../db/sync.js';
 import { budgetSummary, categoryTotals, calendarPeriod } from '../lib/budget.js';
 import { fundingSummary, overdrawnPots } from '../lib/funding.js';
 import { sparkPoints } from '../lib/chart.js';
+import { planPace } from '../lib/plan.js';
 import { findDuplicate } from '../lib/dupes.js';
 import { learnPayee, recallPayee } from '../lib/payees.js';
 import { icon } from '../ui/icons.js';
@@ -73,7 +74,7 @@ export async function renderAdd(root) {
           <button type="submit" id="save" class="save" disabled aria-label="Save entry">${icon('arrowUp', { size: 22 })}</button>
         </div>
 
-        <div class="repeat-prompt" id="repeat-prompt" hidden>
+        <div class="repeat-prompt" id="repeat-prompt" data-unsaved hidden>
           <div class="repeat-item">
             <span class="repeat-kicker">Logging again</span>
             <strong id="repeat-name"></strong>
@@ -101,6 +102,8 @@ export async function renderAdd(root) {
           <button type="button" data-dir="in" aria-pressed="false">Received</button>
         </div>
       </form>
+
+      <section class="pace" id="pace" hidden></section>
 
       <section class="inbox" id="inbox" hidden>
         <h2 class="recent-head" id="inbox-head">To be resolved</h2>
@@ -156,6 +159,7 @@ export async function renderAdd(root) {
   const splitBox = root.querySelector('#split');
   const dupeBox = root.querySelector('#dupe');
   const allowance = root.querySelector('#allowance');
+  const pace = root.querySelector('#pace');
 
   let direction = 'out';
   let toastTimer = null;
@@ -868,6 +872,70 @@ export async function renderAdd(root) {
          } remaining</span>`;
   }
 
+  /**
+   * How fast the month's plan is going, directly under the input.
+   *
+   * It sits above everything else because it is the one card meant to be read
+   * *before* spending: by the time a big entry is logged, the useful moment has
+   * passed. It says nothing until a plan is set in Settings, and says it in
+   * days rather than rupees — "13 days of plan in 4" needs no arithmetic.
+   */
+  async function refreshPace() {
+    const r = planPace(history, await getMeta('plan.monthly', null));
+    pace.hidden = !r;
+    if (!r) return;
+
+    const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+    const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
+    const edit = '<a class="allowance-action" href="#settings?focus=plan">Edit plan</a>';
+    const fixedLine = r.fixed.length
+      ? `<span class="allowance-detail pace-fixed">Fixed costs kept out of this: ${formatMinor(r.fixedPaidMinor)} of ${formatMinor(
+          r.fixedMinor
+        )} paid</span>`
+      : '';
+
+    if (r.status === 'unfunded') {
+      pace.className = 'pace allowance over';
+      pace.innerHTML = `<span class="allowance-kicker">Spending pace</span>
+        <span class="allowance-detail">Fixed costs and the buffer take all of the ${formatMinor(r.incomeMinor)} income, so there is nothing left to plan.</span>
+        ${edit}`;
+      return;
+    }
+
+    const fill = Math.min(100, (r.spentMinor / r.budgetMinor) * 100);
+    const mark = Math.min(100, (r.paceMinor / r.budgetMinor) * 100);
+    let line;
+    if (r.status === 'ok') {
+      line = `On plan. ${formatMinor(r.leftPerDayMinor)} a day keeps it there for the ${days(r.daysLeft)} left.`;
+    } else if (r.status === 'fast') {
+      const buffer = r.bufferRunOutAt && r.bufferMinor ? `, the buffer by ${DATE.format(new Date(r.bufferRunOutAt))}` : '';
+      line = `<b>${days(Math.round(r.daysUsed))} of plan spent in ${r.dayNumber}.</b> At this rate it runs out on
+        ${DATE.format(new Date(r.runOutAt))}${buffer}. ${formatMinor(r.leftPerDayMinor)} a day from here gets back on plan.`;
+    } else if (r.status === 'buffer') {
+      line = `<b>Past the plan by ${formatMinor(r.spentMinor - r.budgetMinor)}.</b> ${formatMinor(
+        r.bufferLeftMinor
+      )} of buffer left for ${days(r.daysLeft)}.`;
+    } else {
+      line = `<b>Past the plan and the ${formatMinor(r.bufferMinor)} buffer by ${formatMinor(
+        r.spentMinor - r.budgetMinor - r.bufferMinor
+      )}.</b> ${days(r.daysLeft)} to go.`;
+    }
+
+    pace.className = `pace allowance pace-${r.status}${r.status === 'buffer' || r.status === 'broke' ? ' over' : ''}`;
+    pace.innerHTML = `
+      <span class="pace-top"><span class="allowance-kicker">Spending pace</span><span class="pace-day">Day ${r.dayNumber} of ${r.totalDays}</span></span>
+      <span class="allowance-main">${formatMinor(r.spentMinor)} <small>of ${formatMinor(r.budgetMinor)}</small></span>
+      <span class="pace-bar" role="img" aria-label="${formatMinor(r.spentMinor)} spent of ${formatMinor(
+        r.budgetMinor
+      )}; the plan allows ${formatMinor(r.paceMinor)} by today">
+        <span class="pace-fill" style="width:${fill.toFixed(1)}%"></span>
+        <span class="pace-mark" style="left:${mark.toFixed(1)}%"></span>
+      </span>
+      <span class="allowance-detail pace-line">${line}</span>
+      ${fixedLine}
+      ${edit}`;
+  }
+
   async function refreshNames() {
     const names = await knownNames(300);
     datalist.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('');
@@ -883,6 +951,7 @@ export async function renderAdd(root) {
       refreshNames(),
       refreshSuggestions(),
       refreshAllowance(),
+      refreshPace(),
       refreshPending(),
     ]);
   }

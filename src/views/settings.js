@@ -79,6 +79,39 @@ export async function renderSettings(root, params) {
       </div>
 
       <div class="card">
+        <h3>Monthly plan</h3>
+        <p class="hint">
+          What you earn, what leaves every month regardless, and what to hold back. The rest is
+          your spending plan, and the home screen tracks how fast it is going. Fixed costs are
+          kept out of that pace, so a remittance day does not read as a spending spree.
+        </p>
+        <label class="stack">Monthly income
+          <input type="text" id="plan-income" inputmode="decimal" placeholder="e.g. 130000" />
+        </label>
+        <label class="stack">Payday <small>(day of the month)</small>
+          <input type="number" id="plan-payday" inputmode="numeric" min="1" max="31" step="1" placeholder="1" />
+        </label>
+        <label class="stack">Buffer <small>(held back, not planned)</small>
+          <input type="text" id="plan-buffer" inputmode="decimal" placeholder="e.g. 20000" />
+        </label>
+        <h4>Fixed monthly costs</h4>
+        <p class="hint">
+          Name each one the way you log it: “remittance” matches “ammi remittance 30000”.
+          Separate alternatives with commas, like “netflix, spotify”.
+        </p>
+        <div id="plan-fixed-list"></div>
+        <div class="plan-fixed-add">
+          <input type="text" id="plan-fixed-name" placeholder="e.g. remittance" spellcheck="false" />
+          <input type="text" id="plan-fixed-amt" inputmode="decimal" placeholder="amount" />
+          <button type="button" id="add-plan-fixed">Add</button>
+        </div>
+        <p class="plan-sum" id="plan-sum"></p>
+        <p id="plan-msg" class="hint"></p>
+        <button type="button" id="save-plan">Save plan</button>
+        <button type="button" id="clear-plan">Clear plan</button>
+      </div>
+
+      <div class="card">
         <h3>Monthly spending setup</h3>
         <p class="hint">
           Opening balance tells Hisaab how much money you started the period with. You can
@@ -778,6 +811,119 @@ Content-Type: text/plain
     }
   }
 
+  /* The monthly plan. One object in meta; the fixed list saves as it changes,
+   * the three figures on Save, and the sum underneath follows the boxes as
+   * they are typed so the plan they add up to is visible before it is kept. */
+  const planIncome = root.querySelector('#plan-income');
+  const planPayday = root.querySelector('#plan-payday');
+  const planBuffer = root.querySelector('#plan-buffer');
+  const planFixedList = root.querySelector('#plan-fixed-list');
+  const planFixedName = root.querySelector('#plan-fixed-name');
+  const planFixedAmt = root.querySelector('#plan-fixed-amt');
+  const planSum = root.querySelector('#plan-sum');
+  const planMsg = root.querySelector('#plan-msg');
+  let planFixed = [];
+
+  function renderPlanSum() {
+    const incomeMinor = toMinor(planIncome.value) || 0;
+    const bufferMinor = toMinor(planBuffer.value) || 0;
+    const fixedMinor = planFixed.reduce((a, f) => a + f.amountMinor, 0);
+    const budgetMinor = incomeMinor - fixedMinor - bufferMinor;
+    planSum.classList.toggle('warn', incomeMinor > 0 && budgetMinor <= 0);
+    planSum.innerHTML = incomeMinor > 0
+      ? `${formatMinor(incomeMinor)} − ${formatMinor(fixedMinor)} fixed − ${formatMinor(bufferMinor)} buffer
+         = <b>${formatMinor(budgetMinor, { sign: budgetMinor < 0 ? '−' : '' })}</b> to spend`
+      : '';
+  }
+
+  function renderPlanFixed() {
+    planFixedList.innerHTML = planFixed.length
+      ? planFixed
+          .map(
+            (f) => `<div class="rule-row">
+              <span class="rule-desc"><b>${escapeHtml(f.name)}</b> · ${formatMinor(f.amountMinor)}</span>
+              <button type="button" class="link" data-del-fixed="${escapeHtml(f.id)}">Remove</button>
+            </div>`
+          )
+          .join('')
+      : '<p class="hint">No fixed costs yet.</p>';
+    renderPlanSum();
+  }
+
+  async function refreshPlan() {
+    const plan = await getMeta('plan.monthly', null);
+    planIncome.value = plan?.incomeMinor ? String(plan.incomeMinor / 100) : '';
+    planPayday.value = plan?.payday ? String(plan.payday) : '';
+    planBuffer.value = plan?.bufferMinor ? String(plan.bufferMinor / 100) : '';
+    planFixed = Array.isArray(plan?.fixed) ? plan.fixed : [];
+    renderPlanFixed();
+  }
+
+  async function storePlan(changes) {
+    const plan = (await getMeta('plan.monthly', null)) || {};
+    await setMeta('plan.monthly', { ...plan, fixed: planFixed, ...changes });
+  }
+
+  planIncome.addEventListener('input', renderPlanSum);
+  planBuffer.addEventListener('input', renderPlanSum);
+
+  root.querySelector('#add-plan-fixed').addEventListener('click', async () => {
+    const name = planFixedName.value.trim();
+    const amountMinor = toMinor(planFixedAmt.value);
+    if (!name || amountMinor === null || amountMinor <= 0) {
+      planMsg.className = 'warn';
+      planMsg.textContent = 'Give the fixed cost a name and an amount.';
+      return;
+    }
+    planFixed = [...planFixed, { id: newId(), name, amountMinor }];
+    await storePlan({});
+    planFixedName.value = '';
+    planFixedAmt.value = '';
+    planMsg.className = 'ok';
+    planMsg.textContent = `Added ${name}.`;
+    renderPlanFixed();
+  });
+
+  planFixedList.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-del-fixed]')?.dataset.delFixed;
+    if (!id) return;
+    planFixed = planFixed.filter((f) => f.id !== id);
+    await storePlan({});
+    renderPlanFixed();
+  });
+
+  root.querySelector('#save-plan').addEventListener('click', async () => {
+    const incomeMinor = toMinor(planIncome.value);
+    const bufferMinor = planBuffer.value.trim() ? toMinor(planBuffer.value) : 0;
+    const payday = planPayday.value.trim() ? Number(planPayday.value) : 1;
+    if (incomeMinor === null || incomeMinor <= 0) {
+      planMsg.className = 'warn';
+      planMsg.textContent = 'Enter your monthly income.';
+      return;
+    }
+    if (bufferMinor === null || bufferMinor < 0) {
+      planMsg.className = 'warn';
+      planMsg.textContent = 'The buffer has to be an amount, or blank for none.';
+      return;
+    }
+    if (!Number.isInteger(payday) || payday < 1 || payday > 31) {
+      planMsg.className = 'warn';
+      planMsg.textContent = 'Payday is a day of the month, 1 to 31.';
+      return;
+    }
+    await storePlan({ incomeMinor, bufferMinor, payday });
+    await refreshPlan();
+    planMsg.className = 'ok';
+    planMsg.textContent = 'Plan saved.';
+  });
+
+  root.querySelector('#clear-plan').addEventListener('click', async () => {
+    await setMeta('plan.monthly', null);
+    await refreshPlan();
+    planMsg.className = 'ok';
+    planMsg.textContent = 'Plan cleared.';
+  });
+
   /* Recurring schedules. A plain array in meta. */
   const schedList = root.querySelector('#sched-list');
   const schedCat = root.querySelector('#sched-cat');
@@ -1073,9 +1219,16 @@ Content-Type: text/plain
     refreshCatBudgets(),
     refreshRules(),
     refreshSchedules(),
+    refreshPlan(),
     refreshIngest(),
     refreshFeedbackIdentity(),
   ]);
+
+  if (params?.get('focus') === 'plan') {
+    const section = planIncome.closest('details');
+    if (section) section.open = true;
+    planIncome.scrollIntoView({ block: 'center' });
+  }
 
   if (params?.get('focus') === 'transfer') {
     const section = transferBox.closest('details');
@@ -1093,7 +1246,7 @@ function organiseSettings(root) {
     ['Account & sync', 'Install Hisaab or use the same ledger on your devices.', ['Install Hisaab', 'Sync'], true],
     ['Smart capture', 'Optional categorisation and notification shortcuts.', ['AI categorisation (optional)', 'Payment notification import (advanced)'], false],
     ['Appearance', 'Choose how the app looks on this device.', ['Accent colour'], false],
-    ['Balances & budget', 'Set what you have, what to protect, and where to slow down.', ['Current balances', 'Monthly spending setup', 'Savings goal', 'Category budgets'], false],
+    ['Balances & budget', 'Set what you have, what to protect, and where to slow down.', ['Monthly plan', 'Current balances', 'Monthly spending setup', 'Savings goal', 'Category budgets'], false],
     ['Recurring payments', 'Keep regular bills and income from slipping past.', ['Recurring & reminders'], false],
     ['Automatic categories', 'File familiar purchases the same way every time.', ['Category rules'], false],
     ['Backup & corrections', 'Fix a balance, move old data, or download a copy.', ['Correct a balance', 'Import from Bluecoins', 'Download a backup', 'Data on this device'], false],

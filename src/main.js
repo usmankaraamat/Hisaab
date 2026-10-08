@@ -72,6 +72,10 @@ async function refreshReviewBadge() {
 }
 
 async function show() {
+  if (deferredRefresh) {
+    clearInterval(deferredRefresh);
+    deferredRefresh = null;
+  }
   const { name, params } = parseHash();
   const render = views[name] || views.add;
   for (const b of tabs.querySelectorAll('button')) {
@@ -91,6 +95,50 @@ async function show() {
   await render(view, params);
   if (name === 'add' || !views[name]) maybeOfferOnboarding(view);
   refreshReviewBadge();
+}
+
+/* A background result (sync, the forwarded-payment inbox) repaints the view so
+ * it shows the new rows, but a repaint rebuilds the DOM and throws away
+ * whatever the user is halfway through typing. The first sync after launch
+ * nearly always reports pulled > 0 — the server's updated_at trigger echoes
+ * back every row this device just pushed — so without this the Add screen
+ * reliably wiped itself a few seconds after opening. Hold the repaint while
+ * anything in the view has been edited, and apply it once the edit is saved,
+ * cleared, or the user navigates (show() itself is the flush). */
+let deferredRefresh = null;
+
+function fieldIsDirty(el) {
+  if (el.disabled) return false;
+  if (el instanceof HTMLSelectElement) {
+    return [...el.options].some((o) => o.selected !== o.defaultSelected);
+  }
+  if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+    return el.checked !== el.defaultChecked;
+  }
+  return el.value !== el.defaultValue;
+}
+
+function viewIsBusy() {
+  for (const el of view.querySelectorAll('input:not([type=hidden]), textarea, select')) {
+    if (fieldIsDirty(el)) return true;
+  }
+  // A view can mark a half-finished step that has no typed text yet, such as
+  // a picked suggestion still waiting for its amount.
+  return Boolean(view.querySelector('[data-unsaved]:not([hidden])'));
+}
+
+async function refreshInBackground() {
+  if (!viewIsBusy()) {
+    await show();
+    return;
+  }
+  if (deferredRefresh) return;
+  deferredRefresh = setInterval(() => {
+    if (viewIsBusy()) return;
+    clearInterval(deferredRefresh);
+    deferredRefresh = null;
+    show();
+  }, 1500);
 }
 
 tabs.addEventListener('click', (e) => {
@@ -143,7 +191,7 @@ show();
 // Auto-capture: pull any forwarded notifications on load. Gated + best-effort
 // inside pullInbox, so this is a no-op unless the user has set it up.
 pullInbox().then((r) => {
-  if (r?.pulled && parseHash().name === 'add') show();
+  if (r?.pulled && parseHash().name === 'add') refreshInBackground();
 });
 
 // Sync runs entirely off the capture path — a failure here must never surface
@@ -153,11 +201,11 @@ startAutoSync(async (result) => {
   await setMeta('sync.lastRun', new Date().toISOString());
   if (result.fundingAdopted || (result.pulled > 0 && parseHash().name !== 'settings')) {
     invalidate();
-    await show();
+    await refreshInBackground();
   }
   // Piggyback the inbox pull on the same cadence as sync.
   const ingest = await pullInbox().catch(() => null);
-  if (ingest?.pulled && parseHash().name === 'add') await show();
+  if (ingest?.pulled && parseHash().name === 'add') await refreshInBackground();
 });
 
 // sw.js lives in public/, so it is served from the deploy base — not from the

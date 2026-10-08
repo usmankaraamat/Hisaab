@@ -41,6 +41,7 @@ import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../s
 import { answerQuery } from '../src/lib/query.js';
 import { questionTerms, itemTotal, topItems } from '../src/lib/items.js';
 import { payeeKey, learnPayee, recallPayee, forgetPayee } from '../src/lib/payees.js';
+import { normalisePlan, planPeriod, matchFixed, fixedTerms, planPace } from '../src/lib/plan.js';
 import {
   rideSurge,
   priceIndex,
@@ -1305,6 +1306,63 @@ console.log('\n--- the accent is readable in both themes ---');
  *
  * Nothing else here can catch it: it needs a browser, a session and a network,
  * and it fails by doing nothing at all. So the shape is asserted in the text. */
+console.log('\n--- the monthly plan, and how fast it is going ---');
+{
+  // 130k a month, 60k of it fixed, 20k held back: 50k to live on. Paid on the 5th.
+  const plan = {
+    incomeMinor: 13000000,
+    payday: 5,
+    bufferMinor: 2000000,
+    fixed: [
+      { id: 'home', name: 'remittance', amountMinor: 5500000 },
+      { id: 'subs', name: 'netflix, youtube premium', amountMinor: 500000 },
+    ],
+  };
+  const row = (raw_name, rupees, at, extra = {}) => ({
+    raw_name, amount_minor: rupees * 100, direction: 'out', occurred_at: at, source: 'manual', ...extra,
+  });
+  const rows = [
+    row('ammi remittance', 55000, localIso(2026, 10, 5, 10), { category: 'Transfers & Loans' }),
+    row('Netflix', 1500, localIso(2026, 10, 6, 9), { category: 'Entertainment' }),
+    row('groceries', 12000, localIso(2026, 10, 5, 18), { category: 'Groceries' }),
+    row('dinner out', 6000, localIso(2026, 10, 7, 21), { category: 'Eating Out' }),
+    row('groceries', 3000, localIso(2026, 9, 30, 18), { category: 'Groceries' }), // last period
+    row('shoes', 9000, localIso(2026, 10, 6, 12), { category: 'Shopping', deleted: 1 }),
+    row('burger from Ali', 800, localIso(2026, 10, 6, 13), { category: 'Eating Out', ledger_effect: 'borrowed', counterparty_name: 'Ali' }),
+    row('savings', 10000, localIso(2026, 10, 6, 13), { category: 'Savings' }),
+    row('old groceries', 4000, localIso(2026, 10, 6, 13), { category: 'Groceries', source: 'bluecoins' }),
+    row('lunch tomorrow', 700, localIso(2026, 10, 9, 13), { category: 'Eating Out' }), // future
+  ];
+  const now = new Date(2026, 9, 8, 20);
+  const r = planPace(rows, plan, now);
+
+  check('plan = income − fixed − buffer', [r.fixedMinor, r.budgetMinor], [6000000, 5000000]);
+  check('period runs payday to payday', [new Date(r.periodStart).getDate(), new Date(r.periodEnd).getMonth(), r.totalDays], [5, 10, 31]);
+  check('day 4 of 31, today still to spend', [r.dayNumber, r.daysLeft], [4, 28]);
+  check('fixed, deleted, borrowed, savings, imported, earlier and future rows are kept out', r.spentMinor, 1800000);
+  check('fixed expenses are tracked as paid, alternatives included', r.fixed.map((f) => [f.paidMinor, f.done]), [[5500000, true], [150000, false]]);
+  check('18k by day 4 is spending too fast', [r.status, Math.round(r.daysUsed)], ['fast', 11]);
+  check('what is left, per remaining day', r.leftPerDayMinor, 114200);
+  check('runs out on the 16th, buffer on the 20th', [new Date(r.runOutAt).getDate(), new Date(r.bufferRunOutAt).getDate()], [16, 20]);
+
+  const calm = planPace(rows.filter((x) => x.raw_name !== 'groceries'), plan, now);
+  check('6k by day 4 is on plan, no run-out date', [calm.status, calm.runOutAt], ['ok', null]);
+  const over = planPace([...rows, row('phone', 40000, localIso(2026, 10, 8, 12), { category: 'Shopping' })], plan, now);
+  check('past the plan, into the buffer', [over.status, over.bufferLeftMinor, over.leftPerDayMinor], ['buffer', 1200000, 0]);
+  const broke = planPace([...rows, row('phone', 60000, localIso(2026, 10, 8, 12), { category: 'Shopping' })], plan, now);
+  check('past the buffer too', [broke.status, broke.bufferLeftMinor], ['broke', 0]);
+
+  check('before payday, the period began last month', new Date(planPeriod(new Date(2026, 9, 3), 5).start).getMonth(), 8);
+  check('a 31st payday lands on the last day of February', new Date(planPeriod(new Date(2027, 1, 28, 12), 31).start).getDate(), 28);
+  check('fixed names match whole words only', [
+    matchFixed({ raw_name: 'homemade cake' }, [{ name: 'home' }]),
+    matchFixed({ raw_name: 'YouTube Premium 1100' }, plan.fixed)?.id,
+  ], [null, 'subs']);
+  check('comma-separated alternatives', fixedTerms({ name: 'Netflix, YouTube-Premium' }), ['netflix', 'youtube premium']);
+  check('fixed costs and buffer that eat the income leave nothing to plan', planPace([], { ...plan, bufferMinor: 8000000 }, now).status, 'unfunded');
+  check('no income, no plan', [normalisePlan({ payday: 5 }), planPace(rows, null, now)], [null, null]);
+}
+
 console.log('\n--- the lazy Supabase client is always awaited ---');
 {
   const srcDir = join(here, '..', 'src');
