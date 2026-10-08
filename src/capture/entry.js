@@ -73,7 +73,7 @@ export async function renderAdd(root) {
           <button type="submit" id="save" class="save" disabled aria-label="Save entry">${icon('arrowUp', { size: 22 })}</button>
         </div>
 
-        <div class="repeat-prompt" id="repeat-prompt" hidden>
+        <div class="repeat-prompt" id="repeat-prompt" data-unsaved hidden>
           <div class="repeat-item">
             <span class="repeat-kicker">Logging again</span>
             <strong id="repeat-name"></strong>
