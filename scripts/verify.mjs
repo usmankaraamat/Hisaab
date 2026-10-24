@@ -37,7 +37,10 @@ import { rankSuggestions, referenceDays, slotOf, slotLabel } from '../src/captur
 import { parseNotification } from '../src/capture/notif.js';
 import { ACCENTS, DEFAULT_ACCENT, accentById } from '../src/ui/theme.js';
 import { matchRule, ruleFields, suggestMatch, learnedCategory } from '../src/lib/rules.js';
-import { nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey } from '../src/lib/schedule.js';
+import {
+  nextDueAfter, dueSchedules, advanceSchedule, occurrenceKey,
+  upcomingBills, recurringSuggestions, scheduleFromSuggestion,
+} from '../src/lib/schedule.js';
 import { answerQuery } from '../src/lib/query.js';
 import { questionTerms, itemTotal, topItems } from '../src/lib/items.js';
 import { payeeKey, learnPayee, recallPayee, forgetPayee } from '../src/lib/payees.js';
@@ -426,6 +429,65 @@ check('a due schedule advances to its next future occurrence',
   advanceSchedule(scheds[0], asOfAug8).nextDue.slice(0, 10), '2026-09-01');
 check('an occurrence key is stable per due date',
   occurrenceKey(scheds[0]), 'sched:rent:2026-08-01');
+
+check('a quarterly one steps by three months',
+  nextDueAfter('2026-01-15T09:00:00.000Z', 'quarterly').slice(0, 10), '2026-04-15');
+
+console.log('\n--- upcoming bills ---');
+// Aug 8 to the period end on Sep 1: rent on Sep 1 is after it, gym is not.
+const billScheds = [
+  { id: 'rent', name: 'Rent', amountMinor: 2500000, direction: 'out', cadence: 'monthly', nextDue: '2026-09-01T09:00:00.000Z' },
+  { id: 'gym', name: 'Gym', amountMinor: 300000, direction: 'out', cadence: 'monthly', nextDue: '2026-08-20T09:00:00.000Z' },
+  { id: 'pay', name: 'Salary', amountMinor: 13000000, direction: 'in', cadence: 'monthly', nextDue: '2026-08-20T09:00:00.000Z' },
+  { id: 'net', name: 'Netflix', amountMinor: 150000, direction: 'out', cadence: 'weekly', nextDue: '2026-08-10T09:00:00.000Z' },
+];
+const ups = upcomingBills(billScheds, [], { now: asOfAug8, until: localIso(2026, 9, 1) });
+check('only outgoing bills due before the period ends are upcoming',
+  ups.map((u) => u.id), ['net', 'net', 'gym', 'net', 'net']);
+check('a bill already paid ahead of its due date is not listed again',
+  upcomingBills([billScheds[1]], [spend({ raw_name: 'gym', amount_minor: 300000, occurred_at: '2026-08-14T10:00:00.000Z' })],
+    { now: new Date('2026-08-15T12:00:00.000Z'), until: localIso(2026, 9, 1) }).length, 0);
+check('but a purchase weeks before it is not mistaken for the payment',
+  upcomingBills([billScheds[1]], [spend({ raw_name: 'gym', amount_minor: 300000, occurred_at: '2026-08-01T10:00:00.000Z' })],
+    { now: new Date('2026-08-15T12:00:00.000Z'), until: localIso(2026, 9, 1) }).length, 1);
+const withBills = budgetSummary(ledgerJuly, { now: asOfAug8, schedules: billScheds });
+check('upcoming bills are not deducted from what is safe to spend',
+  withBills.safeToSpendMinor, 7856000);
+check('they are reported beside it', withBills.upcomingMinor, 300000 + 4 * 150000);
+check('with what would be left after them', withBills.afterBillsMinor, 7856000 - 900000);
+check('a recurring bill waiting in the inbox is still upcoming',
+  budgetSummary(ledgerJuly, { now: asOfAug8, pending: [
+    { id: 'p', kind: 'recurring', direction: 'out', amountMinor: 2500000, counterparty: 'Rent', occurred_at: '2026-08-03T09:00:00.000Z' },
+    { id: 'q', kind: 'notification', direction: 'out', amountMinor: 999, occurred_at: '2026-08-03T09:00:00.000Z' },
+  ] }).upcomingMinor, 2500000);
+check('and is not counted twice before its schedule has advanced',
+  budgetSummary(ledgerJuly, { now: asOfAug8, schedules: [billScheds[1]], pending: [
+    { id: 'p', kind: 'recurring', direction: 'out', amountMinor: 300000, counterparty: 'Gym',
+      source_key: occurrenceKey(billScheds[1]), occurred_at: billScheds[1].nextDue },
+  ] }).upcomingMinor, 300000);
+
+console.log('\n--- recurring suggestions ---');
+const monthly = (raw_name, month, extra = {}) => ({ raw_name, amount_minor: 30000, direction: 'out', source: 'manual',
+  occurred_at: `2026-${month}-05T10:00:00.000Z`, ...extra });
+const suggestNow = new Date('2026-09-10T00:00:00.000Z');
+check('bread bought on the same date two months running is not suggested',
+  recurringSuggestions([monthly('bread', '07', { category: 'Groceries' }), monthly('bread', '08', { category: 'Groceries' })], [], [],
+    { now: suggestNow }).length, 0);
+check('two matching charges are enough for a subscription',
+  recurringSuggestions([monthly('Netflix', '07', { category: 'Subscriptions' }), monthly('Netflix', '08', { category: 'Subscriptions' })], [], [],
+    { now: suggestNow }).map((s) => s.label), ['Netflix']);
+check('three steady charges are enough anywhere',
+  recurringSuggestions(['06', '07', '08'].map((m) => monthly('milkman', m)), [], [], { now: suggestNow }).length, 1);
+const netflix = [monthly('Netflix', '07', { category: 'Subscriptions' }), monthly('Netflix', '08', { category: 'Subscriptions' })];
+const [netSuggestion] = recurringSuggestions(netflix, [], [], { now: suggestNow });
+check('a dismissed suggestion is not asked again',
+  recurringSuggestions(netflix, [], [netSuggestion.key], { now: suggestNow }).length, 0);
+const accepted = scheduleFromSuggestion(netSuggestion, { id: 'x', now: suggestNow });
+check('an accepted suggestion becomes a schedule due at its next future cycle',
+  [accepted.name, accepted.amountMinor, accepted.cadence, accepted.category, accepted.nextDue > suggestNow.toISOString()],
+  ['Netflix', 30000, 'monthly', 'Subscriptions', true]);
+check('and is not suggested again once tracked',
+  recurringSuggestions(netflix, [accepted], [], { now: suggestNow }).length, 0);
 
 console.log('\n--- per-category budgets ---');
 const budgetRows = [

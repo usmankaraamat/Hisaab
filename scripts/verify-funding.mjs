@@ -135,9 +135,17 @@ const cardBillRows = [
   row({ raw_name: 'Netflix', amount_minor: 10_000, funding_source: 'other', occurred_at: '2026-08-01T10:00:00.000Z' }),
 ];
 const cardBillBudget = budgetSummary(cardBillRows, { funding: recurringFunding, now: recurringNow });
-check('a recurring card bill does not reduce essential safe-to-spend or daily allowance',
-  [cardBillBudget.committedMinor, cardBillBudget.totalCommittedMinor, cardBillBudget.safeToSpendMinor, cardBillBudget.dailyMinor],
-  [0, 10_000, 100_000, 5_800]);
+check('a detected but unconfirmed bill neither reduces the allowance nor is reported',
+  [cardBillBudget.upcomingMinor, cardBillBudget.safeToSpendMinor, cardBillBudget.dailyMinor],
+  [0, 100_000, 5_800]);
+const confirmedBillBudget = budgetSummary(cardBillRows, {
+  funding: recurringFunding,
+  now: recurringNow,
+  schedules: [{ id: 'n', name: 'Netflix', amountMinor: 10_000, direction: 'out', cadence: 'monthly', nextDue: '2026-08-31T09:00:00.000Z' }],
+});
+check('a confirmed bill is a footnote to essential safe-to-spend, not a deduction',
+  [confirmedBillBudget.upcomingMinor, confirmedBillBudget.safeToSpendMinor, confirmedBillBudget.afterBillsMinor],
+  [10_000, 100_000, 90_000]);
 
 
 const pots = (e, o) => ({ essentialMinor: e, otherMinor: o });

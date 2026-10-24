@@ -126,7 +126,10 @@ Four smaller conveniences layer onto the same offline, private core:
   explicit "over by", never colour alone).
 - **Recurring** — tell the app about rent or a subscription and its occurrence
   drops into the inbox when due, for a one-tap confirm. It never logs money that
-  may not have moved.
+  may not have moved. Charges that look recurring in your history are only ever
+  *suggested* — Track or Not recurring — because two loaves of bread bought on
+  the same date two months running is a coincidence, not a bill. Removing a
+  tracked bill stops it being suggested again.
 - **Ask** — a one-line question box over the local ledger ("how much on chicken
   this month", "who owes me the most"), answered on the device with no model and
   no data leaving the phone.
@@ -216,15 +219,20 @@ computed:
 | --- | --- |
 | **cash** | everything that actually moved. The honest total. |
 | **spend** | consumption only. Savings, transfers and money lent out are excluded. |
-| **committed** | recurring charges already due before the next income. |
-| **safe** | cash − committed − the savings target not yet met − what you owe. |
+| **upcoming** | recurring bills you track, due before the period ends. A footnote, not a deduction. |
+| **safe** | cash − the savings target not yet met. |
+
+Upcoming bills are shown beside `safe` with what would be left once they are
+paid, but are never taken out of it. Until a bill is paid the money is still in
+the account, and a balance that has already spent it stops matching anything
+you can check.
 
 Savings is netted, not accumulated: redeeming part of it reopens the gap to the
 target. A figure that can only ever grow is not a target.
 
-What you owe reduces `safe`; what is owed *to* you does not increase it. It may
-never come, and a spending limit should not be inflated by an optimistic
-assumption. Both figures are the Ledger's own — see below.
+Debts stay out of `safe` in both directions: what you owe leaves the balance when
+the repayment is logged, and what is owed *to* you is not added — it may never
+come, and a spending limit should not be inflated by an optimistic assumption. Both figures are the Ledger's own — see below.
 
 `safe ÷ days left` sits under the capture input, because that is the only place a
 number can change a decision. The period is the calendar month, anchored to the

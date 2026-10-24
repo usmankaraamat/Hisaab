@@ -11,9 +11,11 @@
  *               still owed are all excluded. Savings is netted, so redeeming
  *               some of it reopens the gap to the target rather than being
  *               quietly ignored.
- *   committed   recurring charges already known to be due before the next
- *               income. Spoken for, even though it has not left yet.
- *   safe        cash − committed − the savings target not yet met.
+ *   upcoming    recurring bills you have confirmed, due before the period
+ *               ends. Reported beside safe, never subtracted from it: until a
+ *               bill is paid the money is still yours, and a balance that has
+ *               already spent it no longer matches the account.
+ *   safe        cash − the savings target not yet met.
  *
  * `safe / daysLeft` is the one figure that belongs under the capture input,
  * because it is the only one that can change a decision at the moment of
@@ -26,11 +28,10 @@
  * Pure functions over rows, so they run offline and are checked in verify.mjs.
  */
 
-import { subscriptions } from './insights.js';
+import { upcomingBills, occurrenceKey } from './schedule.js';
 import { balances, ledgerTotals } from './ledger.js';
 import { personKey } from '../capture/split.js';
-import { groupKey } from '../capture/normalize.js';
-import { fundingSource, fundingSummary } from './funding.js';
+import { fundingSummary } from './funding.js';
 import { isFundingTransfer } from './transfers.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -198,10 +199,13 @@ export function calendarPeriod(now = new Date()) {
  * @param opening   `{ amountMinor, at }` — what the wallet held at that instant.
  *                  Overrides the income anchor when it is the later of the two,
  *                  so a correction made today is not undone by last month's pay.
+ * @param schedules the recurring charges the person has confirmed (meta
+ *                  `schedules`). Only these are ever reported as upcoming.
+ * @param pending   inbox items; a recurring one is a bill due and not yet paid.
  */
 export function budgetSummary(
   rows,
-  { opening = null, savingsTargetMinor = 0, funding = null, now = new Date() } = {}
+  { opening = null, savingsTargetMinor = 0, funding = null, schedules = [], pending = [], now = new Date() } = {}
 ) {
   const all = live(rows);
   const fundingBalance = fundingSummary(rows, funding, now);
@@ -308,29 +312,30 @@ export function budgetSummary(
   const nextIncomeMs = periodEndMs;
   const daysLeft = Math.max(1, Math.ceil((nextIncomeMs - now.getTime()) / DAY_MS));
 
-  // Recurring charges already due inside this period. `subscriptions` reads the
-  // whole history on purpose — a cycle cannot be detected from one period.
-  const horizon = nextIncomeMs ?? now.getTime() + 30 * DAY_MS;
-  const committed = subscriptions(all.filter((r) => !isFundingTransfer(r) && new Date(r.occurred_at).getTime() <= now.getTime()), { now })
-    .filter((s) => !s.lapsed)
-    .filter((s) => {
-      const due = new Date(s.nextDue).getTime();
-      return due > now.getTime() && due <= horizon;
-    });
-  const committedMinor = committed.reduce((a, s) => a + s.lastMinor, 0);
-
-  // A recurring payment is reserved from the pot that paid its latest cycle.
-  // This keeps a card-funded Netflix bill from quietly shrinking the essential
-  // account allowance simply because subscriptions are detected globally.
-  const committedEssentialMinor = fundingBalance
-    ? committed.reduce((total, subscription) => {
-        const latest = all
-          .filter((r) => r.direction === 'out' && groupKey(r.raw_name) === subscription.key)
-          .filter((r) => r.occurred_at === subscription.lastSeen)
-          .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
-        return total + (fundingSource(latest) === 'essential' ? subscription.lastMinor : 0);
-      }, 0)
-    : committedMinor;
+  // Bills the person has said recur, due before the period ends. Reported, not
+  // deducted: see lib/schedule.js. A due bill already surfaced into the inbox
+  // has had its schedule advanced, so it is read from the inbox instead —
+  // still unpaid until it is confirmed there. Keyed by occurrence, so a bill
+  // caught halfway between the two (in the inbox, schedule not yet advanced)
+  // is counted once.
+  const dueInInbox = pending.filter((p) => p.kind === 'recurring' && p.direction !== 'in');
+  const inboxKeys = new Set(dueInInbox.map((p) => p.source_key).filter(Boolean));
+  const upcoming = [
+    ...dueInInbox
+      .map((p) => ({
+        id: p.id,
+        name: p.counterparty || 'Recurring',
+        amountMinor: p.amountMinor,
+        category: p.category || null,
+        cadence: null,
+        dueAt: p.occurred_at,
+        overdue: true,
+      })),
+    ...upcomingBills(schedules, all, { now, until: periodEndMs }).filter(
+      (u) => !inboxKeys.has(occurrenceKey({ id: u.id, nextDue: u.dueAt }))
+    ),
+  ].sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1));
+  const upcomingMinor = upcoming.reduce((a, u) => a + u.amountMinor, 0);
 
   /* Debts, netted per person and read from the whole history.
    *
@@ -359,8 +364,7 @@ export function budgetSummary(
   // impossible to check against. Money owed *to* you is not added back either —
   // it may never come.
   const allowanceCashMinor = fundingBalance ? fundingBalance.essentialMinor : cashMinor;
-  const allowanceCommittedMinor = fundingBalance ? committedEssentialMinor : committedMinor;
-  const safeToSpendMinor = allowanceCashMinor - allowanceCommittedMinor - savingsRemainingMinor;
+  const safeToSpendMinor = allowanceCashMinor - savingsRemainingMinor;
 
   return {
     since: new Date(sinceMs).toISOString(),
@@ -406,9 +410,11 @@ export function budgetSummary(
     iOweMinor: owed.iOweMinor,
     people: book,
 
-    committed,
-    committedMinor: allowanceCommittedMinor,
-    totalCommittedMinor: committedMinor,
+    upcoming,
+    upcomingMinor,
+    // What would be safe once every upcoming bill is paid. A footnote to the
+    // headline, never the headline itself.
+    afterBillsMinor: safeToSpendMinor - upcomingMinor,
     savingsTargetMinor,
     savingsRemainingMinor,
     safeToSpendMinor,
