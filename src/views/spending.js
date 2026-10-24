@@ -18,7 +18,7 @@
  * Everything on this screen reads IndexedDB, so it works offline.
  */
 
-import { allTransactions, getMeta } from '../db/local.js';
+import { allTransactions, getMeta, listPending } from '../db/local.js';
 import { budgetSummary, categoryTotals, categoryBudgets, spendPace, ON_OTHERS } from '../lib/budget.js';
 import { savingsPot } from '../lib/trends.js';
 import { answerQuery } from '../lib/query.js';
@@ -27,6 +27,7 @@ import { bridgeLayout, linePoints, gridLines, ceilNice, FRAME } from '../lib/cha
 import { formatMinor } from '../lib/money.js';
 import { escapeHtml } from '../capture/entry.js';
 import { go } from '../nav.js';
+import { loadSuggestions, suggestionsHtml, wireSuggestions } from '../ui/recurring.js';
 
 const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 
@@ -34,12 +35,14 @@ export async function renderSpending(root) {
   root.innerHTML = '<section class="spending"><h2>Spending</h2><div id="spend-body"></div></section>';
   const host = root.querySelector('#spend-body');
 
-  const [rows, opening, target, budgets, funding] = await Promise.all([
+  const [rows, opening, target, budgets, funding, schedules, pending] = await Promise.all([
     allTransactions(),
     getMeta('budget.opening', null),
     getMeta('budget.savingsTarget', 0),
     getMeta('budget.categories', {}),
     getMeta('budget.funding', null),
+    getMeta('schedules', []),
+    listPending().catch(() => []),
   ]);
 
   if (!rows.length && !funding) {
@@ -48,7 +51,15 @@ export async function renderSpending(root) {
   }
 
   const now = new Date();
-  const budget = budgetSummary(rows, { opening, savingsTargetMinor: Number(target) || 0, funding, now });
+  const budget = budgetSummary(rows, {
+    opening,
+    savingsTargetMinor: Number(target) || 0,
+    funding,
+    schedules,
+    pending,
+    now,
+  });
+  const suggestions = await loadSuggestions(rows, now);
   // The pot is a running balance, not a per-period figure. See lib/trends.js.
   budget.potMinor = savingsPot(rows).minor;
 
@@ -59,7 +70,7 @@ export async function renderSpending(root) {
     <section class="dashboard-level right-now">
       <div class="dashboard-heading"><span>Right now</span><p>The figures that shape the next decision.</p></div>
       ${leftCard(budget)}
-      ${committedCard(budget)}
+      ${upcomingCard(budget, suggestions)}
     </section>
     <section class="dashboard-level where-it-went">
       <div class="dashboard-heading"><span>Where it went</span><p>Ask the ledger or inspect the exact entries.</p></div>
@@ -80,6 +91,11 @@ export async function renderSpending(root) {
   paintBreakdown(breakdownHost, rows, budget, range);
 
   wireAsk(host, rows, now);
+  const upcomingHost = host.querySelector('#upcoming-card');
+  if (upcomingHost) {
+    wireSuggestions(upcomingHost, () => suggestions, () => renderSpending(root));
+    upcomingHost.querySelector('[data-manage]')?.addEventListener('click', () => go('settings'));
+  }
 }
 
 /**
@@ -160,6 +176,17 @@ function ledgerLine(b) {
   return `<p class="hint people-line">${parts.join(' and ')} — see the Ledger.</p>`;
 }
 
+/* Upcoming bills, as a footnote to the balance rather than a deduction from it.
+ * The headline stays what you can spend if the bill is not paid; this line says
+ * what is left if it is. */
+function billsLine(b) {
+  if (!b.upcomingMinor) return '';
+  const until = DATE.format(new Date(b.periodEnd));
+  const left = b.afterBillsMinor;
+  return `<p class="hint bills-line">${formatMinor(b.upcomingMinor)} in recurring bills due before ${until}
+    (not deducted above) — <b class="${left < 0 ? 'down' : ''}">${signedMinor(left)}</b> safe once they are paid.</p>`;
+}
+
 function card(title, inner, hint = '') {
   return `<div class="card">
     <h3>${title}</h3>
@@ -178,9 +205,9 @@ function signedMinor(minor) {
 
 /**
  * The headline. `safeToSpend` is deliberately the big number rather than cash:
- * cash includes rent that has not been charged yet and a savings target not yet
- * met, and a figure that quietly includes money you have already promised away
- * is exactly the figure that leads to overspending.
+ * cash includes a savings target not yet met, and a figure that quietly includes
+ * money you have already promised to yourself is exactly the figure that leads
+ * to overspending. Bills are a footnote, not a deduction — see billsLine.
  */
 function leftCard(b) {
   if (b.funding) {
@@ -191,7 +218,6 @@ function leftCard(b) {
        <p class="big-sub">in your essential account</p>
        ${row('Other bank money', signedMinor(b.otherMinor))}
        ${row('Total across both', signedMinor(b.cashMinor))}
-       ${b.committedMinor ? row('Bills still due', `− ${formatMinor(b.committedMinor)}`, 'up') : ''}
        ${
          b.savingsTargetMinor
            ? row(
@@ -201,6 +227,7 @@ function leftCard(b) {
              )
            : ''
        }
+       ${billsLine(b)}
        ${ledgerLine(b)}`,
       'New expenses use Essential. In History, tap Mark non-essential beside a transaction to move it to Other bank money.'
     );
@@ -236,7 +263,6 @@ function leftCard(b) {
              }`
      }</p>
      ${row('In the wallet', formatMinor(b.cashMinor))}
-     ${b.committedMinor ? row('Bills still due', `− ${formatMinor(b.committedMinor)}`, 'up') : ''}
      ${
        b.savingsTargetMinor
          ? row(
@@ -256,6 +282,7 @@ function leftCard(b) {
          ? row('Owed to other people', `− ${formatMinor(b.iOweMinor)}`, 'up')
          : ''
      }
+     ${billsLine(b)}
      ${ledgerLine(b)}`,
     `${period}${until ? `, next expected ${until}` : ''}.`
   );
@@ -263,8 +290,8 @@ function leftCard(b) {
 
 /**
  * The same subtraction as the card above, drawn as a bridge so the arithmetic is
- * visible rather than asserted: the wallet, less the bills and the savings, is
- * what is safe. Each chip steps down from where the last left
+ * visible rather than asserted: the wallet, less the savings still to set
+ * aside, is what is safe. Each chip steps down from where the last left
  * off; the final bar is the answer, green when there is room and red when the
  * period is already over budget. Skipped entirely when nothing is deducted —
  * there is no story to draw when cash and safe are the same number.
@@ -274,7 +301,6 @@ const WF = { w: 340, h: 172, top: 24, right: 8, bottom: 30, left: 8 };
 function bridgeCard(b) {
   if (b.anchoredTo === 'none') return '';
   const steps = [];
-  if (b.committedMinor) steps.push({ label: 'Bills', minor: -b.committedMinor });
   if (b.savingsRemainingMinor) steps.push({ label: 'To save', minor: -b.savingsRemainingMinor });
   if (!steps.length) return '';
 
@@ -518,21 +544,25 @@ function paintBreakdown(hostEl, rows, b, range) {
   hostEl.querySelector('#bk-to').addEventListener('change', repaint);
 }
 
-function committedCard(b) {
-  const subs = b.committed;
-  if (!subs.length) return '';
-  return card(
-    'Still to come',
-    subs
-      .map((s) =>
-        row(
-          `${escapeHtml(s.label)}<small>${s.cadence} · due ${DATE.format(new Date(s.nextDue))}</small>`,
-          formatMinor(s.lastMinor)
-        )
+function upcomingCard(b, suggestions) {
+  const bills = b.upcoming;
+  if (!bills.length && !suggestions.length) return '';
+  const list = bills
+    .map((u) =>
+      row(
+        `${escapeHtml(u.name)}<small>${u.overdue ? 'due now — confirm it on Home' : `${u.cadence ? `${u.cadence} · ` : ''}due ${DATE.format(new Date(u.dueAt))}`}</small>`,
+        formatMinor(u.amountMinor),
+        u.overdue ? 'up' : ''
       )
-      .join(''),
-    'Recurring charges already subtracted from what is safe to spend.'
-  );
+    )
+    .join('');
+  return `<div class="card" id="upcoming-card">
+    <h3>Upcoming bills</h3>
+    ${bills.length ? `<p class="hint">Recurring charges you track, due before ${DATE.format(new Date(b.periodEnd))}. Not taken off what is safe to spend until you pay them.</p>` : ''}
+    ${list}
+    ${suggestionsHtml(suggestions)}
+    <button type="button" class="link" data-manage>Manage recurring in Settings</button>
+  </div>`;
 }
 
 function faresCard(rows) {

@@ -21,7 +21,7 @@ const STEPS = [
   {
     eyebrow: 'Your pace',
     title: 'Use safe to spend as a guide',
-    body: 'Hisaab works out a daily amount from your balance, savings target, and money you owe. It is a guide for the rest of the period, not a warning that you have done something wrong.',
+    body: 'Hisaab works out a daily amount from your balance and savings target. Upcoming bills are shown underneath rather than taken off. It is a guide for the rest of the period, not a warning that you have done something wrong.',
   },
   {
     eyebrow: 'Across devices',
@@ -64,11 +64,12 @@ const SETTINGS_HELP = {
     ],
   },
   'Recurring payments': {
-    intro: 'Add money that repeats so Hisaab can remind you when it is due.',
+    intro: 'Add money that repeats so Hisaab can remind you when it is due. Bills due this month are shown beside safe to spend, not taken off it.',
     items: [
       '<b>Name and amount:</b> use the amount you normally expect; you can correct the final entry when you confirm it.',
       '<b>Spent or Received:</b> choose Spent for bills and Received for salary or other regular income.',
-      '<b>Next due:</b> enter the next occurrence, then choose weekly, fortnightly, or monthly.',
+      '<b>Next due:</b> enter the next occurrence, then choose weekly, fortnightly, monthly, or quarterly.',
+      '<b>Suggestions:</b> charges that look regular are offered here and on Spending. Tap Track to add one, or Not recurring to stop being asked.',
       '<b>Good first setup:</b> add rent, subscriptions, and salary. Skip irregular purchases.',
     ],
   },

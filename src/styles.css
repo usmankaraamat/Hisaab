@@ -2124,3 +2124,13 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .plan-sum { margin: 14px 0 6px; font-size: .9rem; font-variant-numeric: tabular-nums; }
 .plan-sum b { color: var(--text); }
+
+/* Recurring: suggested bills and the upcoming-bills footnote. */
+.recurring-suggest { margin-top: 12px; }
+.suggest-actions { display: flex; flex: none; gap: 12px; }
+.muted-link { color: var(--muted); font-weight: 500; }
+#upcoming-card > .link,
+#sched-suggest > .link { margin-top: 10px; }
+.spending .bills-line { margin: 10px 0 0; font-size: .8rem; }
+.spending .bills-line b.down { color: var(--danger); }
+.allowance-bills { opacity: .85; }

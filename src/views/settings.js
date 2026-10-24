@@ -30,6 +30,8 @@ import {
   submitProductFeedback,
 } from '../product-data.js';
 import { requestInstall } from '../ui/install.js';
+import { loadSuggestions, suggestionsHtml, wireSuggestions } from '../ui/recurring.js';
+import { scheduleKey } from '../lib/schedule.js';
 
 export async function renderSettings(root, params) {
   root.innerHTML = `
@@ -198,9 +200,11 @@ export async function renderSettings(root, params) {
         <h3>Recurring &amp; reminders</h3>
         <p class="hint">
           Known charges — rent, a subscription, a salary. When one falls due it appears in
-          “To be resolved” on the home screen for a one-tap confirm.
+          “To be resolved” on the home screen for a one-tap confirm. Bills due before the
+          month ends are shown beside what is safe to spend, never taken off it.
         </p>
         <div id="sched-list"></div>
+        <div id="sched-suggest"></div>
         <div class="sched-add">
           <input type="text" id="sched-name" placeholder="e.g. Rent" spellcheck="false" />
           <input type="text" id="sched-amt" inputmode="decimal" placeholder="amount" />
@@ -213,6 +217,7 @@ export async function renderSettings(root, params) {
             <option value="monthly">Monthly</option>
             <option value="fortnightly">Fortnightly</option>
             <option value="weekly">Weekly</option>
+            <option value="quarterly">Quarterly</option>
           </select>
           <label class="stack">Next due
             <input type="date" id="sched-due" />
@@ -933,8 +938,26 @@ Content-Type: text/plain
     '<option value="">no category</option>' +
     CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
 
+  const schedSuggest = root.querySelector('#sched-suggest');
+  let schedSuggestions = [];
+  wireSuggestions(schedSuggest, () => schedSuggestions, refreshSchedules);
+  schedSuggest.addEventListener('click', async (e) => {
+    if (!e.target.closest('[data-undismiss]')) return;
+    await setMeta('schedules.dismissed', []);
+    await refreshSchedules();
+  });
+
   async function refreshSchedules() {
-    const schedules = await getMeta('schedules', []);
+    const [schedules, dismissed] = await Promise.all([
+      getMeta('schedules', []),
+      getMeta('schedules.dismissed', []),
+    ]);
+    schedSuggestions = await loadSuggestions(await allTransactions());
+    schedSuggest.innerHTML =
+      suggestionsHtml(schedSuggestions) +
+      (dismissed.length
+        ? `<button type="button" class="link" data-undismiss>Ask again about ${dismissed.length} dismissed</button>`
+        : '');
     schedList.innerHTML = schedules.length
       ? schedules
           .map(
@@ -956,6 +979,14 @@ Content-Type: text/plain
     if (!id) return;
     const schedules = await getMeta('schedules', []);
     await setMeta('schedules', schedules.filter((s) => s.id !== id));
+    // Removing a bill is an answer too: the purchases behind it are not asked
+    // about again as a suggestion.
+    const removed = schedules.find((s) => s.id === id);
+    if (removed) {
+      const dismissed = await getMeta('schedules.dismissed', []);
+      const key = scheduleKey(removed);
+      if (!dismissed.includes(key)) await setMeta('schedules.dismissed', [...dismissed, key]);
+    }
     await refreshSchedules();
   });
 

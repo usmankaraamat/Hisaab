@@ -730,7 +730,7 @@ export async function renderAdd(root) {
     form.addEventListener('click', async (e) => {
       if (e.target.closest('button[data-act="dismiss"]')) {
         await deletePending(p.id);
-        await refreshPending();
+        await Promise.all([refreshPending(), refreshAllowance()]);
       }
     });
 
@@ -822,16 +822,28 @@ export async function renderAdd(root) {
    * change a decision — the moment before an entry is typed.
    */
   async function refreshAllowance() {
-    const [opening, target, funding] = await Promise.all([
+    const [opening, target, funding, schedules, pending] = await Promise.all([
       getMeta('budget.opening', null),
       getMeta('budget.savingsTarget', 0),
       getMeta('budget.funding', null),
+      getMeta('schedules', []),
+      listPending().catch(() => []),
     ]);
     const b = budgetSummary(history, {
       opening,
       savingsTargetMinor: Number(target) || 0,
       funding,
+      schedules,
+      pending,
     });
+    // Upcoming bills ride along as a footnote: the allowance is what you can
+    // spend if they are not paid, and this says what remains if they are.
+    const bills = b.upcomingMinor
+      ? `<span class="allowance-detail allowance-bills">${formatMinor(b.upcomingMinor)} in bills due · ${formatMinor(
+          b.afterBillsMinor,
+          { sign: b.afterBillsMinor < 0 ? '−' : '' }
+        )} after them</span>`
+      : '';
 
     if (funding && Number.isFinite(b.essentialMinor) && Number.isFinite(b.otherMinor)) {
       allowance.hidden = false;
@@ -843,7 +855,7 @@ export async function renderAdd(root) {
         ${b.dailyMinor === null ? '' : `<span class="allowance-detail funding-safe">${formatFunding(b.dailyMinor)} safe per day · ${formatFunding(b.safeToSpendMinor)} safe for this period</span>`}
         <span class="allowance-detail funding-detail">
           <span>Essential</span><span>Other ${formatFunding(b.otherMinor)}</span><span>Total ${formatFunding(b.cashMinor)}</span>
-        </span><a class="allowance-action" href="#settings?focus=transfer">Move money</a>`;
+        </span>${bills}<a class="allowance-action" href="#settings?focus=transfer">Move money</a>`;
       return;
     }
 
@@ -864,12 +876,12 @@ export async function renderAdd(root) {
     allowance.innerHTML = over
       ? `<span class="allowance-kicker">Money for now</span>
          <span class="allowance-main">${formatMinor(-b.safeToSpendMinor)} over</span>
-         <span class="allowance-detail">${b.daysLeft} day${b.daysLeft === 1 ? '' : 's'} left in this period</span>`
+         <span class="allowance-detail">${b.daysLeft} day${b.daysLeft === 1 ? '' : 's'} left in this period</span>${bills}`
       : `<span class="allowance-kicker">Money for now</span>
          <span class="allowance-main">${formatMinor(b.dailyMinor)} <small>a day</small></span>
          <span class="allowance-detail">${formatMinor(b.safeToSpendMinor)} safe · ${b.daysLeft} day${
            b.daysLeft === 1 ? '' : 's'
-         } remaining</span>`;
+         } remaining</span>${bills}`;
   }
 
   /**
